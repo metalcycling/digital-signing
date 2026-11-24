@@ -496,9 +496,25 @@ $('rerender').addEventListener('click', async () => {
 })();
 
 let sending = false;
+let recipientDefaultsVersion = null;
+function recipientDefault(key) {
+  // Use the saved document, not temporary answers entered while reviewing it.
+  const value = snapshot.fields.find(field => field.key === key)?.default;
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  if (!text || text.toUpperCase() === 'REQUIRED') return '';
+  if (key === 'client.email' && (text.length > 254 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(text))) return '';
+  if (key === 'client.name' && text.length > 200) return '';
+  return text;
+}
 $('review-send').addEventListener('click', async () => {
   if (!isReview || locked || sending) return;
   closeFloating();
+  if (recipientDefaultsVersion !== snapshot.version) {
+    $('recipient-name').value = recipientDefault('client.name');
+    $('recipient-email').value = recipientDefault('client.email');
+    recipientDefaultsVersion = snapshot.version;
+  }
   $('send-contract-name').textContent = `${snapshot.name} · Version ${snapshot.version}`;
   $('send-reviewed').checked = false; $('send-error').textContent = '';
   try { await window.emailComposer?.load(snapshot.name); $('send-dialog').showModal(); }

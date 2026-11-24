@@ -30,6 +30,7 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
     {key:'client.start',type:'time',role:'client',label:'Start time',required:true},
     {key:'client.date',type:'date',role:'client',label:'Event date',required:true},
     {key:'client.name',type:'text',role:'client',label:'Name',required:true},
+    {key:'client.email',type:'text',role:'client',label:'Email',required:true},
     {key:'client.signature',type:'signature',role:'client',label:'Client signature',required:true},
   ];
   const vendorField = {key:'vendor.signature',type:'signature',role:'vendor',label:'Vendor signature',required:true};
@@ -135,6 +136,60 @@ test('sent reviews are locked but recipient can still complete the sent contract
   const recipient=await viewer({vendor:false,recipient:true,state:'editable',sent:true});
   assert.equal(recipient.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
   assert.equal(recipient.get('review-send').hidden,true);
+});
+
+test('sending prefills exact recipient tags before personalizing the email', async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'  Jane Smith  ','client.email':'  jane@example.com  '}});
+  v.run("window.emailComposer={load:async()=>{globalThis.composedName=document.getElementById('recipient-name').value;},values:()=>({})}");
+  await v.get('review-send').events.click();
+  assert.equal(v.get('recipient-name').value,'Jane Smith');
+  assert.equal(v.get('recipient-email').value,'jane@example.com');
+  assert.equal(v.run('composedName'),'Jane Smith');
+  await v.get('send-form').events.submit({preventDefault(){}});
+  const payload=JSON.parse(v.calls.find(c=>c.url.endsWith('/send')).options.body);
+  assert.equal(payload.recipient_name,'Jane Smith');
+  assert.equal(payload.recipient_email,'jane@example.com');
+});
+
+test('missing recipient tags, defaults, and REQUIRED placeholders leave sending inputs empty', async()=>{
+  for (const defaults of [{},{'client.name':'REQUIRED','client.email':' required '},{'client.name':'  ','client.email':'not-an-email'}]) {
+    const v=await viewer({vendor:false,review:true,state:'editable',defaults});
+    await v.get('review-send').events.click();
+    assert.equal(v.get('recipient-name').value,'');
+    assert.equal(v.get('recipient-email').value,'');
+  }
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'Jane','client.email':'jane@example.com'}});
+  v.run("snapshot.fields=snapshot.fields.filter(f=>!['client.name','client.email'].includes(f.key))");
+  await v.get('review-send').events.click();
+  assert.equal(v.get('recipient-name').value,'');
+  assert.equal(v.get('recipient-email').value,'');
+});
+
+test('recipient fields prefill independently and ignore temporary review answers', async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'Jane'}});
+  v.run("updateValue(definition('client.name'),'Temporary Name'); updateValue(definition('client.email'),'temporary@example.com')");
+  await v.get('review-send').events.click();
+  assert.equal(v.get('recipient-name').value,'Jane');
+  assert.equal(v.get('recipient-email').value,'');
+  const emailOnly=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.email':'jane@example.com'}});
+  await emailOnly.get('review-send').events.click();
+  assert.equal(emailOnly.get('recipient-name').value,'');
+  assert.equal(emailOnly.get('recipient-email').value,'jane@example.com');
+});
+
+test('recipient edits including cleared values survive closing and reopening the sending dialog', async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'Jane','client.email':'jane@example.com'}});
+  await v.get('review-send').events.click();
+  v.get('recipient-name').value=''; v.get('recipient-email').value='assistant@example.com';
+  v.get('send-cancel').events.click();
+  await v.get('review-send').events.click();
+  assert.equal(v.get('recipient-name').value,'');
+  assert.equal(v.get('recipient-email').value,'assistant@example.com');
+  v.get('recipient-name').value='Assistant';
+  await v.get('send-form').events.submit({preventDefault(){}});
+  const payload=JSON.parse(v.calls.find(c=>c.url.endsWith('/send')).options.body);
+  assert.equal(payload.recipient_name,'Assistant');
+  assert.equal(payload.recipient_email,'assistant@example.com');
 });
 
 test('document dates use MM-DD-YYYY while stored values stay ISO', async()=>{
