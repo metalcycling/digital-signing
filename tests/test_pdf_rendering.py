@@ -115,6 +115,33 @@ def test_mismatched_export_blocks_snapshot_instead_of_guessing():
         render_pdf(data, '<p>{{client.name|text}}</p>')
 
 
+@pytest.mark.parametrize('default', ['', '|default=Short', '|default=REQUIRED'])
+def test_descriptive_client_fields_have_room_with_short_or_empty_answers(default):
+    keys = ['provided_name', 'address', 'venue', 'venue_address', 'pay_by', 'service_requested']
+    tags = [f'{{{{client.{key}|text{default}}}}}' for key in keys]
+    def draw(canvas):
+        canvas.setFont('Helvetica', 11)
+        for index, tag in enumerate(tags):
+            canvas.drawString(40, 700-index*30, tag)
+    snapshot, _ = render_pdf(make_pdf(draw), ''.join(f'<p>{tag}</p>' for tag in tags))
+    widths = [p['box'][2] for p in snapshot['pages'][0]['placements']]
+    assert widths == [180, 300, 200, 300, 220, 360]
+
+
+def test_wider_client_fields_still_stop_at_neighboring_text_and_table_borders():
+    tags = ['{{client.provided_name|text}}', '{{client.service_requested|text}}']
+    def draw(canvas):
+        canvas.setFont('Helvetica', 10)
+        canvas.drawString(40, 700, tags[0])
+        canvas.drawString(180, 700, 'Neighbor')
+        canvas.drawString(40, 650, tags[1])
+        canvas.line(230, 645, 230, 665)
+    snapshot, _ = render_pdf(make_pdf(draw), ''.join(f'<p>{tag}</p>' for tag in tags))
+    name, service = snapshot['pages'][0]['placements']
+    assert name['box'][0] + name['box'][2] <= 178.1
+    assert service['box'][0] + service['box'][2] <= 228.1
+
+
 def test_repeating_named_header_can_appear_on_each_page():
     def draw(canvas):
         for _ in range(2):

@@ -21,6 +21,17 @@ from digital_signing.rendering import RenderError, render_html
 # PDFium is not thread safe. Keep even requests from different app factories serialized.
 PDF_LOCK = threading.Lock()
 
+# Room for names, locations, and descriptive answers even with short defaults.
+# These field-name conventions apply across templates; collision limits still win.
+FIELD_MIN_WIDTHS = {
+    'client.provided_name': 180,
+    'client.address': 300,
+    'client.venue': 200,
+    'client.venue_address': 300,
+    'client.pay_by': 220,
+    'client.service_requested': 360,
+}
+
 
 def demo_pdf(html):
     output = BytesIO()
@@ -75,9 +86,10 @@ def control_width(field, font_size):
         if field.get('allow_other'):
             choices.append('Other')
     minimum = {'number': 48, 'time': 65, 'phone': 95, 'select': 80}.get(kind, 72) * scale
+    minimum = max(minimum, FIELD_MIN_WIDTHS.get(field['key'], 0) * scale)
     if not any(choices):
-        return {'text': 140, 'textarea': 180, 'email': 180, 'phone': 105,
-                'number': 54}.get(kind, 140) * scale
+        return max(minimum, {'text': 140, 'textarea': 180, 'email': 180, 'phone': 105,
+                             'number': 54}.get(kind, 140) * scale)
     text_width = max(pdfmetrics.stringWidth(line, 'Helvetica', font_size)
                      for choice in choices for line in (choice.splitlines() or ['']))
     padding = (22 if kind == 'select' else 12) * scale
