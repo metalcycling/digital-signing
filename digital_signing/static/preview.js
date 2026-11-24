@@ -503,16 +503,16 @@ function recipientDefault(key) {
   if (typeof value !== 'string') return '';
   const text = value.trim();
   if (!text || text.toUpperCase() === 'REQUIRED') return '';
-  if (key === 'client.email' && (text.length > 254 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(text))) return '';
-  if (key === 'client.name' && text.length > 200) return '';
+  if (key === 'client.provided_email' && (text.length > 254 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(text))) return '';
+  if (key === 'client.provided_name' && text.length > 200) return '';
   return text;
 }
 $('review-send').addEventListener('click', async () => {
   if (!isReview || locked || sending) return;
   closeFloating();
   if (recipientDefaultsVersion !== snapshot.version) {
-    $('recipient-name').value = recipientDefault('client.name');
-    $('recipient-email').value = recipientDefault('client.email');
+    $('recipient-name').value = recipientDefault('client.provided_name');
+    $('recipient-email').value = recipientDefault('client.provided_email');
     recipientDefaultsVersion = snapshot.version;
   }
   $('send-contract-name').textContent = `${snapshot.name} · Version ${snapshot.version}`;

@@ -31,6 +31,8 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
     {key:'client.date',type:'date',role:'client',label:'Event date',required:true},
     {key:'client.name',type:'text',role:'client',label:'Name',required:true},
     {key:'client.email',type:'text',role:'client',label:'Email',required:true},
+    {key:'client.provided_name',type:'text',role:'client',label:'Provided name',required:true},
+    {key:'client.provided_email',type:'text',role:'client',label:'Provided email',required:true},
     {key:'client.signature',type:'signature',role:'client',label:'Client signature',required:true},
   ];
   const vendorField = {key:'vendor.signature',type:'signature',role:'vendor',label:'Vendor signature',required:true};
@@ -139,7 +141,7 @@ test('sent reviews are locked but recipient can still complete the sent contract
 });
 
 test('sending prefills exact recipient tags before personalizing the email', async()=>{
-  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'  Jane Smith  ','client.email':'  jane@example.com  '}});
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.provided_name':'  Jane Smith  ','client.provided_email':'  jane@example.com  '}});
   v.run("window.emailComposer={load:async()=>{globalThis.composedName=document.getElementById('recipient-name').value;},values:()=>({})}");
   await v.get('review-send').events.click();
   assert.equal(v.get('recipient-name').value,'Jane Smith');
@@ -152,33 +154,33 @@ test('sending prefills exact recipient tags before personalizing the email', asy
 });
 
 test('missing recipient tags, defaults, and REQUIRED placeholders leave sending inputs empty', async()=>{
-  for (const defaults of [{},{'client.name':'REQUIRED','client.email':' required '},{'client.name':'  ','client.email':'not-an-email'}]) {
+  for (const defaults of [{},{'client.provided_name':'REQUIRED','client.provided_email':' required '},{'client.provided_name':'  ','client.provided_email':'not-an-email'}]) {
     const v=await viewer({vendor:false,review:true,state:'editable',defaults});
     await v.get('review-send').events.click();
     assert.equal(v.get('recipient-name').value,'');
     assert.equal(v.get('recipient-email').value,'');
   }
-  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'Jane','client.email':'jane@example.com'}});
-  v.run("snapshot.fields=snapshot.fields.filter(f=>!['client.name','client.email'].includes(f.key))");
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.provided_name':'Jane','client.provided_email':'jane@example.com'}});
+  v.run("snapshot.fields=snapshot.fields.filter(f=>!['client.provided_name','client.provided_email'].includes(f.key))");
   await v.get('review-send').events.click();
   assert.equal(v.get('recipient-name').value,'');
   assert.equal(v.get('recipient-email').value,'');
 });
 
 test('recipient fields prefill independently and ignore temporary review answers', async()=>{
-  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'Jane'}});
-  v.run("updateValue(definition('client.name'),'Temporary Name'); updateValue(definition('client.email'),'temporary@example.com')");
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.provided_name':'Jane'}});
+  v.run("updateValue(definition('client.provided_name'),'Temporary Name'); updateValue(definition('client.provided_email'),'temporary@example.com')");
   await v.get('review-send').events.click();
   assert.equal(v.get('recipient-name').value,'Jane');
   assert.equal(v.get('recipient-email').value,'');
-  const emailOnly=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.email':'jane@example.com'}});
+  const emailOnly=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.provided_email':'jane@example.com'}});
   await emailOnly.get('review-send').events.click();
   assert.equal(emailOnly.get('recipient-name').value,'');
   assert.equal(emailOnly.get('recipient-email').value,'jane@example.com');
 });
 
 test('recipient edits including cleared values survive closing and reopening the sending dialog', async()=>{
-  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.name':'Jane','client.email':'jane@example.com'}});
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults:{'client.provided_name':'Jane','client.provided_email':'jane@example.com'}});
   await v.get('review-send').events.click();
   v.get('recipient-name').value=''; v.get('recipient-email').value='assistant@example.com';
   v.get('send-cancel').events.click();
@@ -190,6 +192,31 @@ test('recipient edits including cleared values survive closing and reopening the
   const payload=JSON.parse(v.calls.find(c=>c.url.endsWith('/send')).options.body);
   assert.equal(payload.recipient_name,'Assistant');
   assert.equal(payload.recipient_email,'assistant@example.com');
+});
+
+test('sending never falls back to client name or email tags', async()=>{
+  const defaults={'client.name':'Signature name','client.email':'signature@example.com'};
+  const v=await viewer({vendor:false,review:true,state:'editable',defaults});
+  v.run("snapshot.fields=snapshot.fields.filter(f=>!['client.provided_name','client.provided_email'].includes(f.key))");
+  await v.get('review-send').events.click();
+  assert.equal(v.get('recipient-name').value,'');
+  assert.equal(v.get('recipient-email').value,'');
+});
+
+test('provided recipient details do not prefill the name the client enters when signing', async()=>{
+  const defaults={'client.provided_name':'Jane Smith','client.provided_email':'jane@example.com'};
+  const review=await viewer({vendor:false,review:true,state:'editable',defaults});
+  await review.get('review-send').events.click();
+  assert.equal(review.get('recipient-name').value,'Jane Smith');
+  assert.equal(review.get('recipient-email').value,'jane@example.com');
+  assert.equal(review.run("controls.find(c=>c.key==='client.name').input.value"),'');
+  const recipient=await viewer({vendor:false,recipient:true,state:'editable',sent:true,defaults});
+  assert.equal(recipient.run("controls.find(c=>c.key==='client.name').input.value"),'');
+  assert.equal(recipient.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
+  assert.equal(recipient.run("values['client.provided_name']"),'Jane Smith');
+  recipient.run("updateValue(definition('client.name'),'Jane A. Smith')");
+  assert.equal(recipient.run("values['client.name']"),'Jane A. Smith');
+  assert.equal(recipient.run("values['client.provided_name']"),'Jane Smith');
 });
 
 test('document dates use MM-DD-YYYY while stored values stay ISO', async()=>{

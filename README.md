@@ -57,8 +57,9 @@ If a non-Workspace Google account displays an approval code, verify it with the 
 Use the app's **Tag builder** to generate tags, then paste them into Google Docs. Keep each tag within one paragraph or table cell.
 
 ```text
-{{client.name|text|label=Client name}}
-{{client.email|email|default=jane@example.com}}
+{{client.provided_name|text|default=Jane Smith}}
+{{client.provided_email|email|default=jane@example.com}}
+{{client.name|text|label=Name of signer}}
 {{client.phone|phone|default=555-0100}}
 {{event.date|date}}
 {{event.start|time}}
@@ -73,7 +74,7 @@ Use the app's **Tag builder** to generate tags, then paste them into Google Docs
 
 Supported types: `text`, `textarea`, `number`, `date`, `signing_date`, `time`, `phone`, `email`, `select`, `checkbox`, `initials`, and `signature`.
 
-To avoid entering recipient details twice, set `default=` on `client.name` and `client.email` in the copied Google Doc before rendering. The sending dialog uses those saved defaults and keeps them editable. Missing tags/defaults, `REQUIRED` placeholders, and invalid email addresses leave the corresponding input empty. Temporary review answers do not change the saved defaults. Repeated tags must have identical definitions, including their defaults.
+To avoid entering recipient details twice, set `default=` on `client.provided_name` and `client.provided_email` in the copied Google Doc before rendering. The sending dialog uses only those saved defaults and keeps them editable; it does not fall back to `client.name` or `client.email`. Leave `client.name` without a default so the client enters their name independently when signing. Missing tags/defaults, `REQUIRED` placeholders, and invalid email addresses leave the corresponding sending input empty. Temporary review answers do not change the saved defaults. Repeated tags must have identical definitions, including their defaults.
 
 - Fields are required unless marked `optional`. Repeating the same named tag shares one answer; use different names for separate answers.
 - `vendor.*` fields belong to the vendor by default. Use `role=client` or `role=vendor` to set ownership explicitly.
