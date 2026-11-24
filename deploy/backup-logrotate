@@ -1,0 +1,9 @@
+/var/lib/bello-signing/backup-cron.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    su bello bello
+    create 0600 bello bello
+}

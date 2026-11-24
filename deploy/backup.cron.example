@@ -1,0 +1,4 @@
+# Add to the application service user's crontab on Hetzner after a successful test upload.
+# Adjust paths to the deployed checkout and SIGNING_DATA_DIR; server timezone applies.
+# Run daily at 03:17. The app must have been installed with uv sync first.
+17 3 * * * /opt/bello-signing/deploy/backup-cron.sh >> /var/lib/bello-signing/backup-cron.log 2>&1

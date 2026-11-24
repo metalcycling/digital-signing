@@ -1,0 +1,28 @@
+[Unit]
+Description=Bello agreement application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bello
+Group=bello
+WorkingDirectory=/opt/bello-signing
+EnvironmentFile=/etc/bello-signing.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/bello-signing/.venv/bin/python -m digital_signing.deployment_check
+# One worker: the current SQLite workflow relies on process-local locks.
+# Access logs are disabled because signing URLs contain private bearer tokens.
+ExecStart=/opt/bello-signing/.venv/bin/uvicorn digital_signing.app:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --no-access-log
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bello-signing
+
+[Install]
+WantedBy=multi-user.target

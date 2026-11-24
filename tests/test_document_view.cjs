@@ -1,0 +1,252 @@
+// Run with: node --test tests/test_document_view.cjs
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const fs = require('node:fs');
+class Element {
+  constructor() {
+    this.children = []; this.events = {}; this.value = ''; this.hidden = true;
+    this.style = {setProperty() {}}; this.classList = {add() {}, toggle() {}, contains(){return false;}};
+    this.attributes = {}; this.dataset={}; this.clientWidth = 900;
+  }
+  append(...items) { this.children.push(...items); }
+  replaceChildren(...items) { this.children = items; }
+  addEventListener(name, fn) { this.events[name] = fn; }
+  setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  scrollIntoView() {}
+  focus() {}
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  reportValidity() { return true; }
+  getBoundingClientRect() { return {left:0, right:300, top:0, bottom:50, width:300, height:50}; }
+}
+async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}}={}) {
+  const elements = new Map();
+  const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
+  get('zoom').value = 'fit';
+  const fields = [
+    {key:'client.signing_date',type:'date',role:'client',label:'Signing date',required:true},
+    {key:'client.start',type:'time',role:'client',label:'Start time',required:true},
+    {key:'client.date',type:'date',role:'client',label:'Event date',required:true},
+    {key:'client.name',type:'text',role:'client',label:'Name',required:true},
+    {key:'client.signature',type:'signature',role:'client',label:'Client signature',required:true},
+  ];
+  const vendorField = {key:'vendor.signature',type:'signature',role:'vendor',label:'Vendor signature',required:true};
+  if (placed) fields.push(vendorField);
+  for (const field of fields) if (Object.hasOwn(defaults,field.key)) field.default=defaults[field.key];
+  const placement = key => ({key,box:[10,10,100,20],font_size:12,masks:[]});
+  const snapshot = {name:'Test contract',version:1,fields,prefill_values:prefills,correction_note:correctionNote,created_at:'2026-11-17',warnings:[],pages:[
+    {width:600,height:800,placements:fields.map(f=>placement(f.key)),text:'Page one',image_url:'/1.png'},
+    {width:600,height:800,placements:[],text:'Page two',image_url:'/2.png'},
+  ]};
+  const workflow = {state,superseded,sent,signing_date:'2026-11-17',vendor_fields:[vendorField],client_consent:'Client consent',vendor_consent:'Vendor consent',
+    client: state === 'editable' ? null : {values:{'client.name':'Jane Smith','client.signature':{image:'data:image/png;base64,client'}}}};
+  const calls=[];
+  const context=vm.createContext({
+    document:{getElementById:get,createElement:()=>new Element(),body:new Element(),addEventListener() {}},
+    location:{pathname:recipient?'/sign/private-token':vendor?'/countersign/test':'/preview/test',search:recipient||review?'?review=1':''},
+    window:{SignatureEditor:class {open() {}},addEventListener() {}},
+    URLSearchParams, Option:class { constructor(text,value) {this.text=text;this.value=value;} }, ResizeObserver:class {observe() {}},setInterval() {},
+    fetch:async (url, options) => {
+      calls.push({url,options});
+      let data = url.endsWith('/workflow') ? workflow : (url.endsWith('/renders') || url === '/api/sign/private-token') ? [{version:1}] : snapshot;
+      if (options?.method === 'POST') data = {...workflow,state:'completed',vendor:{values:JSON.parse(options.body).values},final_pdf_url:'/final.pdf'};
+      if (url.endsWith('/send')) data = {link:'/sign/new-private-token'};
+      if (url === '/api/email-delivery') data = {mode:'local'};
+      if (url.endsWith('/request-corrections')) data = {version:2,email:{link:'/sign/corrected',delivery_status:'local'}};
+      return {ok:true,json:async()=>data};
+    },
+  });
+  vm.runInContext(fs.readFileSync('digital_signing/static/preview.js','utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(get('preview-notice').textContent,undefined);
+  return {context,get,calls,run:code=>vm.runInContext(code,context)};
+}
+test('vendor sees saved client answers and can sign only vendor fields on the rendered pages',async()=>{
+  const v=await viewer();
+  assert.equal(v.run("controls.find(c=>c.key==='client.name').input.value"),'Jane Smith');
+  assert.equal(v.run("controls.find(c=>c.key==='client.name').input.disabled"),true);
+  assert.equal(v.run("controls.find(c=>c.key==='client.signature').input.children[0].src"),'data:image/png;base64,client');
+  assert.equal(v.run("controls.find(c=>c.key==='vendor.signature').input.disabled"),false);
+  assert.equal(v.get('submit-confirmation').hidden,true);
+  v.run('showPage(1, false)');
+  assert.equal(v.get('page-label').textContent,'Page 2 of 2');
+  assert.equal(v.get('submit-confirmation').hidden,false);
+  v.get('signer-name').value='Vendor'; v.get('signing-consent').checked=true;
+  v.run("values['vendor.signature']={method:'drawn',image:'vendor'}");
+  await v.get('preview-form').events.submit({preventDefault(){}});
+  const submitted=v.calls.find(c=>c.options?.method === 'POST');
+  assert.match(submitted.url,/\/countersign$/);
+  assert.deepEqual(Object.keys(JSON.parse(submitted.options.body).values),['vendor.signature']);
+  assert.equal(v.run('controls.every(c=>c.input.disabled)'),true);
+  assert.equal(v.get('receipt-download').href,'/final.pdf');
+});
+test('missing vendor placeholder gets an editable completion-record field on the last page',async()=>{
+  const v=await viewer({placed:false});
+  assert.equal(v.get('additional-vendor-fields').hidden,true);
+  v.run('showPage(1, false)');
+  assert.equal(v.get('additional-vendor-fields').hidden,false);
+  assert.equal(v.run("controls.find(c=>c.key==='vendor.signature').input.disabled"),false);
+});
+test('vendor cannot edit superseded, completed, or unsubmitted versions',async()=>{
+  for(const options of [{superseded:true},{state:'completed'},{state:'editable'}]) {
+    const v=await viewer(options);
+    assert.equal(v.run('controls.every(c=>c.input.disabled)'),true);
+    v.run('showPage(1,false)');
+    assert.equal(v.get('validate').hidden,true);
+  }
+});
+test('client view still permits only client fields before submission',async()=>{
+  const v=await viewer({vendor:false,state:'editable'});
+  assert.equal(v.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
+  assert.equal(v.run("controls.find(c=>c.key==='vendor.signature').input.disabled"),true);
+  assert.equal(v.get('validate').textContent,'Submit agreement');
+});
+
+test('recipient link uses only scoped endpoints and cannot enable preparation controls',async()=>{
+  const v=await viewer({vendor:false,recipient:true,state:'editable'});
+  assert.equal(v.get('review-details').hidden,true);
+  assert.equal(v.get('validate').textContent,'Submit agreement');
+  assert.equal(v.run("controls.find(c=>c.key==='vendor.signature').input.disabled"),true);
+  assert.ok(v.calls.every(c=>c.url.startsWith('/api/sign/private-token')));
+});
+
+test('review page sends its exact version without navigating away and then locks', async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable'});
+  assert.equal(v.get('review-send').hidden,false);
+  await v.get('review-send').events.click();
+  assert.equal(v.get('send-dialog').open,true);
+  v.get('recipient-name').value='Jane'; v.get('recipient-email').value='jane@example.com';
+  v.get('send-reviewed').checked=true;
+  await v.get('send-form').events.submit({preventDefault(){}});
+  const call=v.calls.find(c=>c.url.endsWith('/send'));
+  assert.equal(call.url,'/api/contracts/test/renders/1/send');
+  assert.equal(JSON.parse(call.options.body).recipient_email,'jane@example.com');
+  assert.equal(v.get('send-dialog').open,false);
+  assert.equal(v.get('sent-client-link').href,'/sign/new-private-token');
+  assert.equal(v.get('review-send').hidden,true);
+  assert.equal(v.get('rerender').disabled,true);
+});
+test('sent reviews are locked but recipient can still complete the sent contract',async()=>{
+  const review=await viewer({vendor:false,review:true,state:'editable',sent:true});
+  assert.equal(review.get('review-send').hidden,true);
+  assert.equal(review.run('controls.every(c=>c.input.disabled)'),true);
+  const recipient=await viewer({vendor:false,recipient:true,state:'editable',sent:true});
+  assert.equal(recipient.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
+  assert.equal(recipient.get('review-send').hidden,true);
+});
+
+test('document dates use MM-DD-YYYY while stored values stay ISO', async()=>{
+  const v=await viewer({vendor:false,state:'editable'});
+  v.run("updateValue(definition('client.date'), '2027-06-12')");
+  assert.equal(v.run("controls.find(c=>c.key==='client.date').input.textContent"),'06-12-2027 (Saturday)');
+  assert.equal(v.run("values['client.date']"),'2027-06-12');
+  v.run("updateValue(definition('client.date'), '')");
+  assert.equal(v.run("controls.find(c=>c.key==='client.date').input.textContent"),'MM-DD-YYYY');
+});
+
+test('signing dates are prefilled and locked; times offer quarter-hour AM/PM choices',async()=>{
+  const v=await viewer({vendor:false,state:'editable'});
+  assert.equal(v.run("controls.find(c=>c.key==='client.signing_date').input.textContent"),'11-17-2026 (Tuesday)');
+  assert.equal(v.run("controls.find(c=>c.key==='client.signing_date').input.disabled"),true);
+  assert.equal(v.run("controls.find(c=>c.key==='client.date').input.disabled"),false);
+  v.run("globalThis.timeInput = makeInput(definition('client.start'))");
+  assert.equal(v.run('timeInput.children[0].children[0].children.length'),13);
+  assert.equal(v.run('timeInput.children[1].children[0].children.length'),5);
+  assert.equal(v.run('timeInput.children[2].children[0].children.length'),3);
+  v.run("timeInput.value='12:15'");
+  assert.equal(v.run('timeInput.children[0].children[0].value'),'12');
+  assert.equal(v.run('timeInput.children[1].children[0].value'),'15');
+  assert.equal(v.run('timeInput.children[2].children[0].value'),'PM');
+  assert.equal(v.run('timeInput.value'),'12:15');
+});
+
+test('Other event editor preserves custom values and time components convert correctly', async()=>{
+  const v=await viewer({vendor:false,state:'editable'});
+  v.run("globalThis.eventField={key:'client.event_type',type:'select',role:'client',label:'Event type',options:['Wedding','Corporate']};globalThis.eventEditor=makeInput(eventField)");
+  assert.equal(v.run('eventEditor.children[0].children[0].children[3].text'),'Other');
+  v.run("eventEditor.value='Other: Graduation party'");
+  assert.equal(v.run('eventEditor.children[1].children[0].value'),'Graduation party');
+  assert.equal(v.run('eventEditor.value'),'Other: Graduation party');
+  v.run("globalThis.timeEditor=makeInput(definition('client.start'));timeEditor.value='00:15'");
+  assert.equal(v.run('timeEditor.children[0].children[0].value'),'12');
+  assert.equal(v.run('timeEditor.children[2].children[0].value'),'AM');
+  assert.equal(v.run('timeEditor.value'),'00:15');
+  v.run("timeEditor.value='23:45'");
+  assert.equal(v.run('timeEditor.children[0].children[0].value'),'11');
+  assert.equal(v.run('timeEditor.children[2].children[0].value'),'PM');
+  assert.equal(v.run('timeEditor.value'),'23:45');
+});
+
+test('vendor requests corrections from the review page and the old version locks',async()=>{
+  const v=await viewer();
+  assert.equal(v.get('request-corrections').hidden,false);
+  await v.get('request-corrections').events.click();
+  assert.equal(v.get('corrections-dialog').open,true);
+  assert.equal(v.get('corrections-confirm').textContent,'Create test request');
+  v.get('corrections-note').value='Please correct the venue address.';
+  await v.get('corrections-form').events.submit({preventDefault(){}});
+  const request=v.calls.find(c=>c.url.endsWith('/request-corrections'));
+  assert.deepEqual(JSON.parse(request.options.body),{note:'Please correct the venue address.'});
+  assert.equal(v.get('corrections-dialog').open,false);
+  assert.equal(v.get('request-corrections').hidden,true);
+  assert.equal(v.run('locked'),true);
+  assert.equal(v.get('sent-client-link').href,'/sign/corrected');
+  assert.equal(v.get('send-result-title').textContent,'Test correction request created');
+});
+test('client correction view restores answers, shows note, and requires a fresh signature and date',async()=>{
+  const v=await viewer({vendor:false,recipient:true,state:'editable',sent:true,
+    prefills:{'client.name':'Jane Smith','client.date':'2027-06-12','client.start':'14:30','client.signing_date':'1900-01-01','client.signature':{image:'old'}},
+    correctionNote:'Please correct the date. <script> is ordinary text.'});
+  assert.equal(v.get('request-corrections').hidden,true);
+  assert.equal(v.get('correction-note-panel').hidden,false);
+  assert.equal(v.get('correction-note-text').textContent,'Please correct the date. <script> is ordinary text.');
+  assert.equal(v.run("values['client.name']"),'Jane Smith');
+  assert.equal(v.run("values['client.date']"),'2027-06-12');
+  assert.equal(v.run("values['client.start']"),'14:30');
+  assert.equal(v.run("values['client.signing_date']"),'2026-11-17');
+  assert.equal(v.run("values['client.signature']"),undefined);
+  assert.equal(v.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
+  assert.notEqual(v.get('signing-consent').checked,true);
+});
+test('correction action is unavailable on completed, superseded, or unsubmitted versions',async()=>{
+  for(const options of [{state:'completed'},{superseded:true},{state:'editable'}]) {
+    const v=await viewer(options);
+    assert.equal(v.get('request-corrections').hidden,true);
+    await v.get('request-corrections').events.click();
+    assert.notEqual(v.get('corrections-dialog').open,true);
+  }
+});
+
+test('explicit dropdown other=false uses only listed choices even for event types',async()=>{
+  const v=await viewer({vendor:false,state:'editable'});
+  v.run("globalThis.closed={key:'client.event_type',type:'select',role:'client',label:'Type of event',options:['Wedding','Corporate'],allow_other:false};globalThis.closedInput=makeInput(closed)");
+  assert.equal(v.run('allowsOther(closed)'),false);
+  assert.equal(v.run('closedInput.children.map(c=>c.text).join(",")'),'Choose…,Wedding,Corporate');
+  assert.equal(v.run('documentButton(closed)'),false);
+  v.run("closedInput.value='Wedding';closedInput.events.input()");
+  assert.equal(v.run("values['client.event_type']"),'Wedding');
+  v.run("globalThis.opened={key:'client.setting',type:'select',role:'client',label:'Setting',options:['Indoors','Outdoors'],allow_other:true};globalThis.openInput=makeInput(opened)");
+  assert.equal(v.run('allowsOther(opened)'),true);
+  v.run("openInput.value='Other: Terrace'");
+  assert.equal(v.run('openInput.value'),'Other: Terrace');
+});
+
+test('defaults prefill editable fields, with correction and saved answers taking precedence',async()=>{
+  const defaults={'client.name':'Prefilled name','client.date':'2027-06-12','client.start':'14:30','client.signature':'not allowed','client.signing_date':'1900-01-01'};
+  const v=await viewer({vendor:false,state:'editable',defaults});
+  assert.equal(v.run("values['client.name']"),'Prefilled name');
+  assert.equal(v.run("controls.find(c=>c.key==='client.name').input.value"),'Prefilled name');
+  assert.equal(v.run("values['client.start']"),'14:30');
+  assert.equal(v.run("values['client.date']"),'2027-06-12');
+  assert.equal(v.run("values['client.signature']"),undefined);
+  assert.equal(v.run("values['client.signing_date']"),'2026-11-17');
+  v.run("updateValue(definition('client.name'),'')");
+  assert.equal(v.run("values['client.name']"),'');
+  const revised=await viewer({vendor:false,state:'editable',defaults,prefills:{'client.name':'','client.start':'15:45'}});
+  assert.equal(revised.run("values['client.name']"),'');
+  assert.equal(revised.run("values['client.start']"),'15:45');
+  const submitted=await viewer({vendor:false,state:'awaiting_vendor',defaults});
+  assert.equal(submitted.run("values['client.name']"),'Jane Smith');
+});

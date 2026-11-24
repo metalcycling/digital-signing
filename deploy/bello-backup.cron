@@ -1,0 +1,4 @@
+# Install as /etc/cron.d/bello-backup only after a successful production restore drill.
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+17 3 * * * bello /opt/bello-signing/deploy/backup-production.sh >> /var/lib/bello-signing/backup-cron.log 2>&1

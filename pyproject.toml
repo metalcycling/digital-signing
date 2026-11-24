@@ -1,0 +1,27 @@
+[project]
+name = "digital-signing"
+version = "0.1.0"
+description = "Local contract preparation workspace"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "cryptography>=46,<51",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic-settings>=2.7,<3",
+  "google-api-python-client>=2.160,<3",
+  "google-auth-oauthlib>=1.2,<2",
+  "beautifulsoup4>=4.13,<5",
+  "tinycss2>=1.4,<2",
+  "pypdfium2>=4.30,<6",
+  "pdfplumber>=0.11,<1",
+  "pillow>=11,<13",
+  "reportlab>=4.3,<5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "httpx>=0.28,<1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
