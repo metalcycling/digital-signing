@@ -4,6 +4,7 @@ from PIL import Image
 import pytest
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
 
 from digital_signing.pdf_rendering import render_pdf
 from digital_signing.rendering import RenderError
@@ -64,6 +65,48 @@ def test_wrapped_tag_has_one_control_and_two_masks():
     assert len(placement['masks']) == 2
     assert snapshot['fields'][0]['options'] == ['Wedding','Corporate']
     assert placement['box'][3] < 15
+
+
+def test_controls_fit_answers_instead_of_tag_metadata_and_masks_still_cover_tags():
+    tags = [
+        '{{client.short|text|default=Jane}}',
+        '{{client.much_longer_field_name|text|label=A much longer label|default=Jane}}',
+        '{{event.count|number|default=1}}',
+        '{{event.type|select|options=Wedding;Corporate;Birthday Party|other=false|default=Wedding}}',
+        '{{client.checked|checkbox|label=I have read and agree to the terms}}',
+    ]
+    def draw(canvas):
+        canvas.setFont('Helvetica', 10)
+        for index, tag in enumerate(tags):
+            canvas.drawString(40, 700-index*35, tag)
+    snapshot, _ = render_pdf(make_pdf(draw), ''.join(f'<p>{tag}</p>' for tag in tags))
+    short, long, number, select, checkbox = snapshot['pages'][0]['placements']
+    assert short['box'][2] == long['box'][2]
+    assert 40 <= number['box'][2] < 60
+    assert select['box'][2] >= pdfmetrics.stringWidth('Birthday Party', 'Helvetica', 10) + 15
+    assert select['box'][2] < 110
+    assert checkbox['box'][2] < 15
+    for placement in (long, select, checkbox):
+        assert placement['masks'][0]['box'][2] > placement['box'][2]
+
+
+def test_long_defaults_get_room_but_remain_bounded_by_nearby_content():
+    address = '1641 Example Avenue, Plantation, FL 33317'
+    tag = '{{client.address|textarea|default=' + address + '}}'
+    # Put a long answer in a short tag position to exercise expansion constraints.
+    def draw(canvas):
+        canvas.setFont('Helvetica', 10)
+        canvas.drawString(40, 700, tag)
+        canvas.drawString(40, 650, '<TEXT>')
+        canvas.drawString(110, 650, 'Neighbor stays visible')
+        canvas.drawString(300, 650, '<TEXT>')
+        canvas.drawImage(ImageReader(Image.new('RGB', (10, 10), '#aa2244')), 360, 645, 20, 20)
+    snapshot, _ = render_pdf(make_pdf(draw), f'<p>{tag}</p><p>&lt;TEXT&gt;</p><p>&lt;TEXT&gt;</p>')
+    address_field, neighbor, image = snapshot['pages'][0]['placements']
+    assert address_field['box'][2] >= pdfmetrics.stringWidth(address, 'Helvetica', 10) + 8
+    assert address_field['box'][2] < address_field['masks'][0]['box'][2]
+    assert neighbor['box'][0] + neighbor['box'][2] <= 108.1
+    assert image['box'][0] + image['box'][2] <= 358.1
 
 
 def test_mismatched_export_blocks_snapshot_instead_of_guessing():

@@ -84,6 +84,8 @@ To avoid entering recipient details twice, set `default=` on `client.provided_na
 
 Legacy tags such as `<TEXT>` and `<DATE>` remain supported. Named tags are recommended for stable field identities and revisions.
 
+Rendered input widths follow the field type, prefilled answer, and dropdown choices rather than the length of the tag. Longer answers remain accessible in the pop-up editor. Render a draft again to apply updated sizing; previously saved and signed versions keep their original layout.
+
 ## Tests
 
 ```sh

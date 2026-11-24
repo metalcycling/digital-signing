@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 import pdfplumber
 import pypdfium2 as pdfium
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.pdfbase import pdfmetrics
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
 from digital_signing.rendering import RenderError, render_html
@@ -53,7 +54,37 @@ def background(image, rectangle, scale):
     return '#%02x%02x%02x' % color
 
 
-def control_box(page, match, rectangles, kind):
+def control_width(field, font_size):
+    """Size the answer control independently of the tag text hidden underneath."""
+    kind = field['type']
+    scale = font_size / 11
+    if kind in {'checkbox', 'initials', 'signature'}:
+        return {'checkbox': 12, 'initials': 62, 'signature': 155}[kind] * scale
+    value = field.get('default', '')
+    value = str(value).strip() if value is not None else ''
+    if value.upper() == 'REQUIRED':
+        value = ''
+    if kind in {'date', 'signing_date'}:
+        # Reserve weekday space even when this date currently falls on a shorter day.
+        value = '09-30-2027 (Wednesday)'
+    elif kind == 'time':
+        value = '12:45 PM'
+    choices = [value]
+    if kind == 'select':
+        choices += field.get('options', [])
+        if field.get('allow_other'):
+            choices.append('Other')
+    minimum = {'number': 48, 'time': 65, 'phone': 95, 'select': 80}.get(kind, 72) * scale
+    if not any(choices):
+        return {'text': 140, 'textarea': 180, 'email': 180, 'phone': 105,
+                'number': 54}.get(kind, 140) * scale
+    text_width = max(pdfmetrics.stringWidth(line, 'Helvetica', font_size)
+                     for choice in choices for line in (choice.splitlines() or ['']))
+    padding = (22 if kind == 'select' else 12) * scale
+    return max(minimum, min(text_width + padding, 270 * scale))
+
+
+def control_box(page, match, rectangles, field):
     first = rectangles[0]
     x0, y0, x1, y1 = first
     # Preserve the placeholder's line height, expanding only into empty horizontal space.
@@ -67,11 +98,10 @@ def control_box(page, match, rectangles, kind):
     for other in obstacles:
         if other['x0'] >= x1 - .1 and other['top'] < bottom and other['bottom'] > top:
             right = min(right, other['x0'] - 2)
-    desired = {'checkbox': 12, 'initials': 62, 'date': 100, 'signing_date': 100, 'time': 80, 'number': 80,
-               'signature': 155, 'select': 155, 'textarea': 155}.get(kind, 150)
-    width = max(x1-x0, min(desired, right-x0))
-    # Never extend beyond the page; long/wrapped placeholders use their first-line extent.
-    width = min(width, page.width-x0)
+    font_size = max(7, min(12, float(match['chars'][0]['size'])))
+    desired = control_width(field, font_size)
+    # Full-size masks still hide every tag character, even when the box is shorter.
+    width = max(1, min(desired, right-x0, page.width-x0))
     return [round(x0, 3), round(top, 3), round(width, 3), round(bottom-top, 3)]
 
 
@@ -122,7 +152,7 @@ def render_pdf(pdf_bytes, html, images=None):
             placements = []
             for match, key in sorted(assignments[index], key=lambda item: (item[0]['top'], item[0]['x0'])):
                 rects = line_rectangles(match['chars'])
-                placements.append({'key': key, 'box': control_box(page, match, rects, fields[key]['type']),
+                placements.append({'key': key, 'box': control_box(page, match, rects, fields[key]),
                     'font_size': max(7, min(12, float(match['chars'][0]['size']))),
                     'masks': [{'box': [r[0]-.25, r[1]-.25, r[2]-r[0]+.5, r[3]-r[1]+.5],
                                'color': background(image, r, scale)} for r in rects]})
