@@ -21,7 +21,7 @@ class Element {
   reportValidity() { return true; }
   getBoundingClientRect() { return {left:0, right:300, top:0, bottom:50, width:300, height:50}; }
 }
-async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}}={}) {
+async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, validationErrors=null, submissionError=false, deliveryError=null}={}) {
   const elements = new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('zoom').value = 'fit';
@@ -55,6 +55,12 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
       calls.push({url,options});
       let data = url.endsWith('/workflow') ? workflow : (url.endsWith('/renders') || url === '/api/sign/private-token') ? [{version:1}] : snapshot;
       if (options?.method === 'POST') data = {...workflow,state:'completed',vendor:{values:JSON.parse(options.body).values},final_pdf_url:'/final.pdf'};
+      if (url.endsWith('/validate')) data = {valid:!validationErrors,errors:validationErrors || {}};
+      if (url.endsWith('/submit')) data = {...workflow,state:'awaiting_vendor',client:{values:JSON.parse(options.body).values}};
+      if (url.endsWith('/submit') || url.endsWith('/countersign')) {
+        if (submissionError) return {ok:false,json:async()=>({detail:'Unable to save the signature.'})};
+        if (deliveryError) data.email_delivery={error:deliveryError};
+      }
       if (url.endsWith('/send')) data = {link:'/sign/new-private-token'};
       if (url === '/api/email-delivery') data = {mode:'local'};
       if (url.endsWith('/request-corrections')) data = {version:2,email:{link:'/sign/corrected',delivery_status:'local'}};
@@ -84,6 +90,55 @@ test('vendor sees saved client answers and can sign only vendor fields on the re
   assert.deepEqual(Object.keys(JSON.parse(submitted.options.body).values),['vendor.signature']);
   assert.equal(v.run('controls.every(c=>c.input.disabled)'),true);
   assert.equal(v.get('receipt-download').href,'/final.pdf');
+  assert.equal(v.get('signing-success-dialog').open,true);
+  assert.equal(v.get('signing-success-title').textContent,'The agreement has been completed.');
+  assert.equal(v.get('signing-success-description').textContent,'You may close this window now.');
+});
+
+test('client submission opens an accessible confirmation and dismissal does not resubmit',async()=>{
+  const v=await viewer({vendor:false,recipient:true,state:'editable'});
+  assert.notEqual(v.get('signing-success-dialog').open,true);
+  v.run('showPage(1,false)'); v.get('signing-consent').checked=true;
+  await v.get('preview-form').events.submit({preventDefault(){}});
+  assert.equal(v.get('signing-success-dialog').open,true);
+  assert.equal(v.get('signing-success-title').textContent,'Your agreement has been submitted.');
+  assert.equal(v.get('signing-success-description').textContent,'It is awaiting the vendor’s signature. You may close this window now.');
+  assert.match(v.get('receipt-description').textContent,/You may close this window now\./);
+  assert.equal(v.get('signing-success-warning').hidden,true);
+  assert.equal(v.get('receipt-download').hidden,true);
+  v.get('signing-success-close').events.click();
+  v.run('applyWorkflow(workflow)');
+  assert.equal(v.get('signing-success-dialog').open,false);
+  assert.equal(v.calls.filter(c=>c.url.endsWith('/submit')).length,1);
+});
+
+test('failed validation, failed saves, and preparation checks never show signing success',async()=>{
+  for (const options of [{validationErrors:{'client.name':'Enter a name.'}},{submissionError:true},{review:true}]) {
+    const v=await viewer({vendor:false,state:'editable',...options});
+    v.run('showPage(1,false)'); v.get('signing-consent').checked=true;
+    await v.get('preview-form').events.submit({preventDefault(){}});
+    assert.notEqual(v.get('signing-success-dialog').open,true);
+  }
+  const vendor=await viewer({submissionError:true});
+  vendor.run('showPage(1,false)'); vendor.get('signing-consent').checked=true;
+  await vendor.get('preview-form').events.submit({preventDefault(){}});
+  assert.notEqual(vendor.get('signing-success-dialog').open,true);
+});
+
+test('saved signature confirmation keeps delivery warnings visible',async()=>{
+  const v=await viewer({deliveryError:'Gmail is unavailable.'});
+  v.run('showPage(1,false)'); v.get('signing-consent').checked=true;
+  await v.get('preview-form').events.submit({preventDefault(){}});
+  assert.equal(v.get('signing-success-dialog').open,true);
+  assert.equal(v.get('signing-success-warning').hidden,false);
+  assert.match(v.get('signing-success-warning').textContent,/Gmail is unavailable/);
+});
+
+test('reopening a signed document does not trigger a new success modal',async()=>{
+  for (const options of [{vendor:false,state:'awaiting_vendor'},{vendor:true,state:'completed'}]) {
+    const v=await viewer(options);
+    assert.notEqual(v.get('signing-success-dialog').open,true);
+  }
 });
 test('missing vendor placeholder gets an editable completion-record field on the last page',async()=>{
   const v=await viewer({placed:false});

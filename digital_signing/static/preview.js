@@ -373,6 +373,26 @@ function drawLegacy() {
   if (!isReview) $('validate').hidden = true;
   notice('This is an older HTML version. Render again from the workspace before submitting.');
 }
+function signingConfirmation(state) {
+  return state.state === 'completed'
+    ? {title:'The agreement has been completed.', description:'You may close this window now.'}
+    : {title:'Your agreement has been submitted.', description:'It is awaiting the vendor’s signature. You may close this window now.'};
+}
+function updateSigningConfirmation(state) {
+  const message = signingConfirmation(state);
+  $('signing-success-title').textContent = message.title;
+  $('signing-success-description').textContent = message.description;
+}
+function showSigningConfirmation(state, warning) {
+  if (isReview || state.superseded || !['awaiting_vendor','completed'].includes(state.state)) return;
+  const dialog = $('signing-success-dialog');
+  if (!dialog) return;
+  updateSigningConfirmation(state);
+  $('signing-success-warning').textContent = warning;
+  $('signing-success-warning').hidden = !warning;
+  if (!dialog.open) dialog.showModal();
+}
+$('signing-success-close')?.addEventListener('click', () => $('signing-success-dialog').close());
 function applyWorkflow(state) {
   workflow = state; locked = isLocked(state);
   $('request-corrections').hidden = !isVendor || locked || state.state !== 'awaiting_vendor';
@@ -397,13 +417,15 @@ function applyWorkflow(state) {
     $('receipt-download').hidden = true; return;
   }
   const completed = state.state === 'completed';
-  $('receipt-title').textContent = completed ? 'Your agreement is fully executed' : state.superseded ? 'This version has been superseded' : 'Your agreement has been submitted';
-  $('receipt-description').textContent = completed ? 'The final PDF includes both signatures.' : state.superseded ? 'A newer revision exists. This version remains saved for your records.' : 'Your answers and signature have been saved. The agreement is awaiting the vendor’s signature. Once completed, you shall receive a copy.';
+  const confirmation = signingConfirmation(state);
+  $('receipt-title').textContent = state.superseded ? 'This version has been superseded' : confirmation.title;
+  $('receipt-description').textContent = state.superseded ? 'A newer revision exists. This version remains saved for your records.' : completed ? confirmation.description : `${confirmation.title} ${confirmation.description}`;
   const awaitingVendor = !completed && !state.superseded;
   $('receipt-title').hidden = awaitingVendor;
   const link = state.final_pdf_url || state.client_pdf_url;
   $('receipt-download').hidden = awaitingVendor || !link;
   if (link) $('receipt-download').href = link;
+  if ($('signing-success-dialog')?.open && !state.superseded) updateSigningConfirmation(state);
 }
 function drawDocument() {
   if (snapshot.pages) drawPages(); else drawLegacy();
@@ -438,8 +460,10 @@ $('preview-form').addEventListener('submit', async (event) => {
     }
     if (isReview) { notice('All fields look good. This review check does not submit the agreement.'); return; }
     const state = await api(`${base}/${snapshot.version}/${isVendor ? 'countersign' : 'submit'}`, post({values:payload, consent:$('signing-consent').checked}));
-    closeFloating(); applyWorkflow(state); notice([state.drive_archive?.error, state.email_delivery?.error ? `Agreement signed and saved. Completion email: ${state.email_delivery.error} Check the workspace outbox.` : ''].filter(Boolean).join(' ')); dirty = false;
+    const warning = [state.drive_archive?.error, state.email_delivery?.error ? `Agreement signed and saved. Completion email: ${state.email_delivery.error} Check the workspace outbox.` : ''].filter(Boolean).join(' ');
+    closeFloating(); applyWorkflow(state); notice(warning); dirty = false;
     $('submission-receipt').scrollIntoView({behavior:'smooth', block:'center'});
+    showSigningConfirmation(state, warning);
   } catch(error) { notice(error.message); if (error.fields) showErrors(error.fields); }
   finally { $('validate').disabled = false; }
 });

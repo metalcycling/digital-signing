@@ -75,3 +75,14 @@
 #receipt-description{max-width:none}
 
 @media(max-width:600px){#request-corrections{display:block;margin:16px 0 0}}
+
+/* Centered signing receipt: native modal focus handling and a dimmed page. */
+.signing-success-dialog{width:min(520px,calc(100vw - 32px));box-sizing:border-box;max-height:calc(100dvh - 32px);overflow:auto;padding:36px 32px;text-align:center;border:1px solid #aabfc9;border-top:6px solid #172d39;border-radius:16px;background:#f5f8fa;color:#172d39;box-shadow:0 24px 80px #12232c66}
+.signing-success-dialog::backdrop{background:#12232c99;backdrop-filter:blur(3px)}
+.signing-success-icon{display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;margin-bottom:18px;border-radius:50%;background:#172d39;color:white;font:36px/1 sans-serif}
+.signing-success-dialog h2{margin:0 0 16px;font-size:28px;line-height:1.25}
+.signing-success-dialog p{margin:0 0 24px;font-size:18px;line-height:1.6}
+.signing-success-dialog button{display:block;width:100%;min-height:48px;margin:0}
+.signing-success-dialog .signing-success-warning{padding:12px;border:1px solid #d4b47b;border-radius:6px;background:#fff6e7;color:#734b19;font-size:14px;text-align:left;overflow-wrap:anywhere}
+.signing-success-dialog [hidden]{display:none!important}
+@media(max-width:480px){.signing-success-dialog{padding:28px 22px}.signing-success-dialog h2{font-size:25px}.signing-success-dialog p{font-size:16px}}
