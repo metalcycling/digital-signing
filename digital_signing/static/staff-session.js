@@ -19,6 +19,8 @@
         location.assign('/login');
       }catch{button.disabled=false;button.textContent='Retry sign out';}
     });
-    account.append(name,button);host.append(account);
+    account.append(name,button);
+    if(host.classList.contains('client-heading'))host.prepend(account);
+    else host.append(account);
   }catch{}
 })();
