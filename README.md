@@ -82,7 +82,9 @@ To avoid entering recipient details twice, set `default=` on `client.provided_na
 - Dropdowns use semicolon-separated `options=`. Set `other=true` to permit custom text or `other=false` to restrict answers to the listed choices.
 - Date defaults use `YYYY-MM-DD`; users see `MM-DD-YYYY` with the weekday. Time defaults use 24-hour `HH:MM` in 15-minute increments; the editor uses hours, minutes, and AM/PM. Signing dates are set automatically when each person signs.
 
-Legacy tags such as `<TEXT>` and `<DATE>` remain supported. Named tags are recommended for stable field identities and revisions.
+Invitation bodies use the manually entered subject title in bold. Signing and completion links default to seven days; each duration remains editable. Final PDFs saved to Drive use the agreement name as the filename.
+
+Use `locked=true` with a valid `default=` to prevent changes after rendering, for example `{{client.price|number|default=1000|locked=true}}`. Locked fields are enforced on submission. Signatures, initials, and automatic signing dates cannot be locked.
 
 Rendered input widths follow the field type, prefilled answer, and dropdown choices rather than the length of the tag. Longer answers remain accessible in the pop-up editor. Render a draft again to apply updated sizing; previously saved and signed versions keep their original layout.
 

@@ -39,7 +39,7 @@ function post(body) { return {method: 'POST', headers: {'Content-Type': 'applica
 function definition(key) { return snapshot.fields.find(f => f.key === key) || workflow.vendor_fields.find(f => f.key === key); }
 function isLocked(state) { return state.superseded || (isReview && state.sent) || state.state !== (isVendor ? 'awaiting_vendor' : 'editable'); }
 function isSigningDate(field) { return field.type === 'signing_date' || (field.type === 'date' && ['signing_date','signed_date','signature_date','singning_date'].includes(field.key.split('.').pop())); }
-function canEdit(field) { return !locked && field.role === activeRole && !isSigningDate(field); }
+function canEdit(field) { return !locked && !field.locked && field.role === activeRole && !isSigningDate(field); }
 function signingFields() { return isVendor ? workflow.vendor_fields : snapshot.fields.filter(f => f.role === 'client'); }
 function showErrors(fieldErrors) {
   for (const key of Object.keys(errors)) delete errors[key];
@@ -67,7 +67,7 @@ function makeComposite(field) {
   const group = document.createElement('div'); group.className='composite-editor'; group.setAttribute('role','group');
   const addSelect = (label, options) => {
     const wrap=document.createElement('label'); wrap.textContent=label;
-    const select=document.createElement('select'); select.setAttribute('aria-label',label); select.append(new Option('—',''));
+    const select=document.createElement('select'); select.disabled=!canEdit(field); select.setAttribute('aria-label',label); select.append(new Option('—',''));
     for (const [value,text] of options) select.append(new Option(text,value));
     wrap.append(select); group.append(wrap); return select;
   };
@@ -89,7 +89,7 @@ function makeComposite(field) {
     const choices=field.options.filter(option=>option.toLowerCase()!=='other');
     const choice=addSelect(field.label,[...choices.map(v=>[v,v]),['__other__','Other']]);
     const label=document.createElement('label');label.textContent='Please specify';
-    const text=document.createElement('input');text.type='text';text.maxLength=150;text.setAttribute('aria-label','Please specify the event');label.append(text);group.append(label);
+    const text=document.createElement('input');text.disabled=!canEdit(field);text.type='text';text.maxLength=150;text.setAttribute('aria-label','Please specify the event');label.append(text);group.append(label);
     read=()=>choice.value==='__other__'?`Other: ${text.value.trim()}`:choice.value;
     write=value=>{const other=value?.startsWith('Other:') || value?.toLowerCase()==='other';choice.value=other?'__other__':value||'';text.value=other?value.replace(/^Other:\s*/i,'').replace(/^Other$/i,''):'';label.hidden=!other;};
     choice.addEventListener('change',()=>{label.hidden=choice.value!=='__other__';group.editing=true;updateValue(field,read());group.editing=false;if(!label.hidden)text.focus();positionFloating();});
@@ -215,7 +215,7 @@ function openFloating(field, anchor) {
   const hint = document.createElement('span'); hint.className = 'floating-field-hint'; hint.textContent = field.required ? 'Required' : 'Optional';
   const error = document.createElement('p'); error.id = 'floating-field-error'; error.className = 'field-error'; error.textContent = errors[field.key] || '';
   input.setAttribute('aria-describedby', error.id);
-  const done = document.createElement('button'); done.type = 'button'; done.textContent = 'Done';
+  const done = document.createElement('button'); done.type = 'button'; done.textContent = 'Apply';
   done.addEventListener('click', () => closeFloating(true));
   floatingEditor.replaceChildren(title, hint, input, error, done);
   floating = {field, anchor, input}; floatingEditor.hidden = false;
@@ -269,8 +269,7 @@ function setRect(element, box) {
 }
 function drawPages() {
   $('document').classList.add('paginated-document');
-  $('page-toolbar').hidden = !isReview; $('page-navigation').hidden = false;
-  $('original-pdf').href = `${base}/${snapshot.version}/source.pdf`;
+  $('page-navigation').hidden = false;
   for (const [index, page] of snapshot.pages.entries()) {
     const wrap = document.createElement('section'); wrap.className = 'pdf-page-wrap';
     wrap.setAttribute('aria-label', `Page ${index+1} of ${snapshot.pages.length}`);
@@ -337,7 +336,7 @@ function resizePages() {
   const available = Math.max(250, $('document').clientWidth - 24);
   for (const {wrap, stage, page} of pageViews) {
     const width = page.width*4/3, height = page.height*4/3;
-    const scale = $('zoom').value === 'fit' ? Math.min(1.5, available/width) : Number($('zoom').value);
+    const scale = Math.min(1.5, available/width);
     stage.style.transform = `scale(${scale})`;
     wrap.style.width = `${width*scale}px`; wrap.style.height = `${height*scale}px`;
   }
@@ -387,6 +386,7 @@ function showConfirmation({title, description, warning='', kind='signing', tone=
   const dialog = $('signing-success-dialog');
   if (!dialog) return;
   dialog.dataset.confirmationKind = kind;
+  dialog.dataset.closeRequested = '';
   dialog.dataset.tone = tone;
   $('signing-success-title').textContent = title;
   $('signing-success-description').textContent = description;
@@ -416,12 +416,17 @@ function sendingConfirmation(email) {
     warning:email.delivery_error || '', tone:'warning',
   };
 }
-$('signing-success-close')?.addEventListener('click', () => $('signing-success-dialog').close());
+$('signing-success-close')?.addEventListener('click', () => {
+  $('signing-success-dialog').dataset.closeRequested = 'true';
+  try { window.close(); } catch {}
+  setTimeout(() => {
+    if (!window.closed) $('signing-success-description').textContent = 'Your browser could not close this tab automatically. You may close it manually now.';
+  }, 300);
+});
 function applyWorkflow(state) {
   workflow = state; locked = isLocked(state);
   $('request-corrections').hidden = !isVendor || locked || state.state !== 'awaiting_vendor';
   $('review-send').hidden = !isReview || locked || !snapshot.pages;
-  $('rerender').disabled = locked;
   if (!locked) return;
   closeFloating();
   if (state.client) { for (const [key,value] of Object.entries(state.client.values)) { const field=definition(key); if(field) updateValue(field,value); } dirty=false; }
@@ -449,30 +454,18 @@ function applyWorkflow(state) {
   const link = state.final_pdf_url || state.client_pdf_url;
   $('receipt-download').hidden = awaitingVendor || !link;
   if (link) $('receipt-download').href = link;
-  if ($('signing-success-dialog')?.open && $('signing-success-dialog').dataset.confirmationKind === 'signing' && !state.superseded) updateSigningConfirmation(state);
+  if ($('signing-success-dialog')?.open && !$('signing-success-dialog').dataset.closeRequested && $('signing-success-dialog').dataset.confirmationKind === 'signing' && !state.superseded) updateSigningConfirmation(state);
 }
 function drawDocument() {
   if (snapshot.pages) drawPages(); else drawLegacy();
-  if (!isReview) return;
-  $('field-count').textContent = `${snapshot.fields.length} unique fields · ${snapshot.occurrences} placements`;
-  for (const field of snapshot.fields) {
-    const row = document.createElement('div'); row.className = 'field-summary';
-    const jump = document.createElement('button'); jump.type = 'button'; jump.textContent = field.label;
-    jump.addEventListener('click', () => focusField(field.key));
-    const detail = document.createElement('small');
-    const pages = [...new Set(controls.filter(c => c.key === field.key).map(c => c.page+1))];
-    detail.textContent = `${field.type} · ${field.role} · ${field.required ? 'required' : 'optional'}${snapshot.pages ? ' · Page '+pages.join(', ') : ''}`;
-    row.append(jump, detail); $('field-list').append(row);
-  }
 }
 $('previous-page').addEventListener('click', () => showPage(currentPage-1));
 $('next-page').addEventListener('click', () => showPage(currentPage+1));
-$('zoom').addEventListener('change', () => { closeFloating(); resizePages(); });
 $('preview-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (snapshot.pages && currentPage < snapshot.pages.length-1) { showPage(currentPage+1); return; }
   if (locked) return;
-  if (!isReview && !$('signing-consent').checked) { notice('Confirm your agreement before submitting.'); $('submit-confirmation').scrollIntoView({block:'center'}); return; }
+  if (!isReview && !$('signing-consent').checked) { notice(isVendor ? 'Before submitting your countersignature and completing the agreement, check the box to confirm that you have reviewed the agreement, agree to its terms, and intend to sign electronically.' : 'Before submitting your answers and electronic signature to the vendor, check the box to confirm that you have reviewed the agreement, agree to its terms, and intend to sign electronically.'); $('signing-consent').focus(); $('submit-confirmation').scrollIntoView({block:'center'}); return; }
   $('validate').disabled = true;
   const payload = Object.create(null);
   for (const field of signingFields()) payload[field.key] = values[field.key] ?? (field.type === 'checkbox' ? false : '');
@@ -491,16 +484,6 @@ $('preview-form').addEventListener('submit', async (event) => {
   } catch(error) { notice(error.message); if (error.fields) showErrors(error.fields); }
   finally { $('validate').disabled = false; }
 });
-$('version').addEventListener('change', () => {
-  if (dirty && !confirm('Switch versions? Temporary preview answers will be cleared.')) { $('version').value = String(snapshot.version); return; }
-  location.search = `?version=${$('version').value}&review=1`;
-});
-$('rerender').addEventListener('click', async () => {
-  if (dirty && !confirm('Render again? Temporary preview answers will be cleared. The current document snapshot will remain in version history.')) return;
-  $('rerender').disabled = true; notice('Exporting Google Docs pages and locating fields…');
-  try { const result = await api(base, post()); location.href = result.preview_url + (isReview ? '&review=1' : ''); }
-  catch(error) { notice(error.message); $('rerender').disabled = false; }
-});
 (async () => {
   try {
     const versions = await api(base);
@@ -510,8 +493,8 @@ $('rerender').addEventListener('click', async () => {
     workflow = await api(`${base}/${snapshot.version}/workflow`);
     locked = isLocked(workflow);
     for (const field of snapshot.fields) {
-      if (field.role === activeRole && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(field,'default')) values[field.key] = field.default;
-      if (field.role === 'client' && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(snapshot.prefill_values || {},field.key)) values[field.key] = snapshot.prefill_values[field.key];
+      if ((field.role === activeRole || field.locked) && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(field,'default')) values[field.key] = field.default;
+      if (!field.locked && field.role === 'client' && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(snapshot.prefill_values || {},field.key)) values[field.key] = snapshot.prefill_values[field.key];
     }
     $('correction-note-panel').hidden = !snapshot.correction_note;
     $('correction-note-text').textContent = snapshot.correction_note || '';
@@ -527,19 +510,12 @@ $('rerender').addEventListener('click', async () => {
     }
     $('validate').textContent = isReview ? 'Check fields' : isVendor ? 'Sign & finalize' : 'Submit agreement';
     $('preview-title').textContent = snapshot.name; document.title = `${snapshot.name} · ${isVendor ? 'Vendor signing' : isReview ? 'Review' : 'Agreement'}`;
-    $('review-details').hidden = !isReview;
-    $('snapshot-meta').textContent = `Version ${snapshot.version} · Rendered ${new Date(snapshot.created_at).toLocaleString()}${snapshot.pages ? ' · '+snapshot.pages.length+' pages' : ''}${snapshot.mode === 'demo' ? ' · Demo document' : ''}`;
-    for (const item of versions) $('version').append(new Option(`Version ${item.version} — ${new Date(item.created_at).toLocaleString()}`, item.version));
-    $('version').value = String(snapshot.version); $('version').disabled = false;
-    if (snapshot.document_url) { $('edit-doc').href = snapshot.document_url; $('edit-doc').hidden = false; }
-    for (const warning of snapshot.warnings) { const item = document.createElement('li'); item.textContent = warning; $('warnings').append(item); }
-    drawDocument(); applyWorkflow(workflow); $('validate').disabled = false; $('rerender').disabled = locked;
+    drawDocument(); applyWorkflow(workflow); $('validate').disabled = false;
     setInterval(async () => {
       if (workflow?.state === 'awaiting_vendor') {
         try { applyWorkflow(await api(`${base}/${snapshot.version}/workflow`)); } catch {}
       }
     }, 15000);
-    if (snapshot.mode === 'demo') $('rerender').textContent = 'Render demo again';
   } catch(error) { notice(error.message); $('preview-title').textContent = 'Preview unavailable'; }
 })();
 

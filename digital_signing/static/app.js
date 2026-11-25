@@ -146,16 +146,20 @@ function buildTag() {
   const automaticDate = type === 'signing_date' || (type === 'date' && ['signing_date','signed_date','signature_date','singning_date'].includes(key.split('.').pop()));
   const supportsDefault = !['signature','initials'].includes(type) && !automaticDate;
   $('tag-default-wrap').hidden = !supportsDefault;
+  $('tag-locked-wrap').hidden = !supportsDefault;
+  const lockField = supportsDefault && $('tag-locked').checked;
   const defaultValue = supportsDefault ? $('tag-default').value.trim() : '';
-  $('tag-default-hint').textContent = ({date:'Use YYYY-MM-DD, for example 2027-06-12.',time:'Use HH:MM in 24-hour format with 15-minute intervals, for example 14:30 (2:30 PM).',checkbox:'Use true for checked or false for unchecked. Required boxes must still be checked before submitting.',select:'Use an exact listed choice, or Other: your answer when custom answers are enabled.'})[type] || 'An editable starting answer, not a placeholder.';
+  $('tag-default-hint').textContent = ({date:'Use YYYY-MM-DD, for example 2027-06-12.',time:'Use HH:MM in 24-hour format with 15-minute intervals, for example 14:30 (2:30 PM).',checkbox:'Use true for checked or false for unchecked. Required boxes must still be checked before submitting.',select:'Use an exact listed choice, or Other: your answer when custom answers are enabled.'})[type] || (lockField ? 'This answer cannot be changed after rendering.' : 'An editable starting answer, not a placeholder.');
   $('tag-options-wrap').hidden = type !== 'select';
   let error = '';
-  if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(key) || key.startsWith('legacy_')) error = 'Use a field name such as client.name (lowercase letters, digits, dots, underscores).';
+  if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(key)) error = 'Use a field name such as client.name (lowercase letters, digits, dots, underscores).';
   if (/[{}|]/.test(label + options + defaultValue)) error = 'Labels, options, and prefilled answers cannot contain braces or pipes.';
   const choices = options.split(';').map(v => v.trim());
   if (type === 'select' && (choices.length < 2 || choices.length > 50 || choices.some(v => !v || v.length > 100) || new Set(choices).size !== choices.length)) error = 'Provide 2–50 distinct dropdown choices, separated by semicolons.';
   if (label.length > 150) error = 'Keep the label under 151 characters.';
+  if (lockField && !defaultValue) error = 'A locked field needs a valid prefilled answer.';
   const pieces = [key, type];
+  if (lockField) pieces.push('locked=true');
   if (label) pieces.push(`label=${label}`);
   if (type === 'select') pieces.push(`options=${choices.join(';')}`, `other=${$('tag-other').checked ? 'true' : 'false'}`);
   if (defaultValue) pieces.push(`default=${defaultValue}`);
@@ -166,7 +170,7 @@ function buildTag() {
   $('copy-tag').disabled = Boolean(error);
   $('copy-result').textContent = '';
 }
-for (const id of ['tag-key', 'tag-type', 'tag-label', 'tag-options', 'tag-other', 'tag-default', 'tag-required', 'tag-role']) $(id).addEventListener('input', buildTag);
+for (const id of ['tag-key', 'tag-type', 'tag-label', 'tag-options', 'tag-other', 'tag-default', 'tag-locked', 'tag-required', 'tag-role']) $(id).addEventListener('input', buildTag);
 $('copy-tag').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('tag-output').textContent); $('copy-result').textContent = 'Copied. Paste into Google Docs.'; }
   catch { $('copy-result').textContent = 'Select the tag above and copy it manually.'; }

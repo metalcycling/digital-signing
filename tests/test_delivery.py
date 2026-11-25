@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import sqlite3
 
 from test_contracts import HEADERS
@@ -89,7 +90,7 @@ def test_custom_messages_defaults_and_fresh_completion_expiration(tmp_path):
     from test_contracts import client
     app, contract, base, payload = prepared(tmp_path)
     options = app.get('/api/email-defaults').json()
-    options.update(invitation_body='Dear {recipient_name},\nSign {contract_name}.\nBest, The team',
+    options.update(invitation_body='Dear {recipient_name},\nSign {invitation_subject}.\nBest, The team',
                    completion_body='Hello {recipient_name},\nHere is {contract_name}.\nThank you, The team',
                    signing_days=7, completion_days=60)
     assert app.put('/api/email-defaults',json=options,headers=HEADERS).status_code == 200
@@ -152,7 +153,8 @@ def test_formatted_email_bolds_contract_and_escapes_user_text():
     assert '<strong>Wedding &amp; reception</strong>' in result
     assert '&lt;img src=x&gt;' in result
     assert '<script>' not in result
-    assert '<a href="/sign/test">Open agreement</a>' in result
+    assert '<a href="/sign/test"' in result
+    assert 'font-size:22px' in result and '>Open agreement</a>' in result
 
 
 def test_invitation_subject_title_is_customizable_and_header_safe(tmp_path):
@@ -165,3 +167,20 @@ def test_invitation_subject_title_is_customizable_and_header_safe(tmp_path):
     assert app.put('/api/email-defaults',json=custom,headers=HEADERS).status_code == 200
     email, _ = invitation(app,base)
     assert email['subject']=='Signature request for Music for Jane Smith — Full signing workflow'
+
+
+def test_invitation_uses_subject_in_body_and_new_links_default_to_seven_days(tmp_path):
+    app, _, base, _ = prepared(tmp_path)
+    options = app.get('/api/email-defaults').json()
+    assert options['signing_days'] == options['completion_days'] == 7
+    title = 'Harp & music <at home>'
+    options.update(invitation_title=title, invitation_body='Hello {recipient_name},\nPlease review and sign the agreement for {contract_name} using the private link below.')
+    email = app.post(base+'/1/send',json={**RECIPIENT,'email_options':options},headers=HEADERS).json()
+    assert email['subject'] == 'Signature request for ' + title
+    assert 'for '+title+' using' in email['body']
+    assert '<strong>Harp &amp; music &lt;at home&gt;</strong>' in email['html_body']
+    assert 'Full signing workflow' not in email['body']
+    assert 'font-size:22px' in email['html_body']
+    with sqlite3.connect(tmp_path/'contracts-demo.sqlite3') as con:
+        created,expiry = con.execute('SELECT created_at,expires_at FROM invitations').fetchone()
+        assert datetime.fromisoformat(expiry)-datetime.fromisoformat(created) == timedelta(days=7)

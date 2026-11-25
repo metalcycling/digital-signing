@@ -49,12 +49,12 @@ def test_signing_dates_use_server_day_and_no_extra_signer_name(tmp_path, monkeyp
 
 
 def test_quarter_hour_times_and_explicit_signing_date_type():
-    field=field_definition('{{event.start|time}}',1,'')
+    field=field_definition('{{event.start|time}}')
     assert not validate_values([field],{'event.start':'00:00'})
     assert not validate_values([field],{'event.start':'23:45'})
     assert validate_values([field],{'event.start':'12:01'})
     assert validate_values([field],{'event.start':'12:15:01'})
     assert display_answer(field,'00:00')=='12:00 AM'
     assert display_answer(field,'12:00')=='12:00 PM'
-    automatic=field_definition('{{vendor.signed|signing_date}}',1,'')
+    automatic=field_definition('{{vendor.signed|signing_date}}')
     assert automatic['type']=='signing_date'

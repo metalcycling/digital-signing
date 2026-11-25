@@ -109,7 +109,7 @@ class GoogleDrive:
         if document.get('trashed') or document.get('mimeType') != DOC or len(document.get('parents', [])) != 1:
             raise ValueError('Cannot locate the copied agreement’s current folder.')
         return self.api.files().create(
-            body={'id':file_id, 'name':f"{contract['name']} - v{version} - Fully executed.pdf",
+            body={'id':file_id, 'name':f"{contract['name']}.pdf",
                   'mimeType':'application/pdf', 'parents':document['parents']},
             media_body=MediaIoBaseUpload(BytesIO(content), mimetype='application/pdf', resumable=False),
             fields='id,webViewLink', supportsAllDrives=True).execute()

@@ -15,7 +15,7 @@ from digital_signing.signatures import signature_error
 from digital_signing.signing_rules import is_signing_date
 
 TYPES = {'text', 'textarea', 'number', 'date', 'signing_date', 'time', 'phone', 'email', 'select', 'checkbox', 'initials', 'signature'}
-TOKEN = re.compile(r'\{\{[^{}]*\}\}|<[A-Z][A-Z_]*>')
+TOKEN = re.compile(r'\{\{[^{}]*\}\}')
 KEY = re.compile(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\Z')
 SAFE_TAGS = {'p', 'div', 'span', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 's', 'sup', 'sub', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'img'}
 STYLE_PROPERTIES = {'font-weight', 'font-style', 'font-size', 'font-family', 'text-decoration', 'text-align', 'color', 'background-color', 'vertical-align', 'line-height', 'padding', 'padding-left', 'padding-right', 'padding-top', 'padding-bottom', 'margin', 'margin-left', 'margin-right', 'margin-top', 'margin-bottom', 'border', 'border-width', 'border-style', 'border-color', 'border-collapse', 'width', 'max-width', 'height', 'text-indent', 'page-break-before', 'page-break-after', 'break-before', 'break-after'}
@@ -64,26 +64,18 @@ def unpack_export(content):
         raise RenderError('Google returned an unreadable HTML export.') from error
 
 
-def field_definition(raw, index, context):
-    legacy = raw.startswith('<')
-    if legacy:
-        field_type = raw[1:-1].lower()
-        key = f'legacy_{field_type}_{index}'
-        parts = []
-        label = context.strip().strip(':').strip() or f'{field_type.title()} {index}'
-        label = label[-120:]
-    else:
-        pieces = [part.strip() for part in raw[2:-2].split('|')]
-        key = pieces.pop(0)
-        if not KEY.fullmatch(key) or key.startswith('legacy_'):
-            raise RenderError(f'Invalid field name in {raw}. Use names such as client.name.')
-        field_type = pieces.pop(0).lower() if pieces and '=' not in pieces[0] and pieces[0] not in {'optional', 'required'} else 'text'
-        parts = pieces
-        label = key.replace('.', ' ').replace('_', ' ').capitalize()
+def field_definition(raw):
+    pieces = [part.strip() for part in raw[2:-2].split('|')]
+    key = pieces.pop(0)
+    if not KEY.fullmatch(key):
+        raise RenderError(f'Invalid field name in {raw}. Use names such as client.name.')
+    field_type = pieces.pop(0).lower() if pieces and '=' not in pieces[0] and pieces[0] not in {'optional', 'required', 'locked'} else 'text'
+    parts = pieces
+    label = key.replace('.', ' ').replace('_', ' ').capitalize()
     if field_type not in TYPES:
         raise RenderError(f'Unknown field type in {raw}. Supported: {", ".join(sorted(TYPES))}.')
     field = {'key': key, 'type': field_type, 'label': label, 'required': True,
-             'role': 'vendor' if key.startswith('vendor.') else 'client', 'options': [], 'legacy': legacy}
+             'role': 'vendor' if key.startswith('vendor.') else 'client', 'options': []}
     seen = set()
     for part in parts:
         name, _, value = part.partition('=')
@@ -98,6 +90,8 @@ def field_definition(raw, index, context):
             field['label'] = value
         elif name == 'default' and '=' in part and value:
             field['default'] = value
+        elif name == 'locked' and (part == 'locked' or value in {'true', 'false'}):
+            field['locked'] = part == 'locked' or value == 'true'
         elif name == 'role' and value in {'client', 'vendor'}:
             field['role'] = value
         elif name == 'other' and field_type == 'select' and (part == 'other' or value in {'true', 'false'}):
@@ -122,6 +116,12 @@ def field_definition(raw, index, context):
         errors = validate_values([dict(field, role='client', required=False)], {key:field['default']})
         if errors:
             raise RenderError(f'Invalid default for {key}: {errors[key]}')
+    if field.get('locked'):
+        if 'default' not in field or field_type in {'signature', 'initials'} or is_signing_date(field):
+            raise RenderError(f'Locked field {key} needs a valid prefilled answer and cannot be a signature, initials, or signing date.')
+        errors = validate_values([dict(field, role='client')], {key:field['default']})
+        if errors:
+            raise RenderError(f'Invalid locked answer for {key}: {errors[key]}')
     return field
 
 
@@ -175,16 +175,14 @@ def render_html(html, images=None):
         text = ''.join(str(node) for node in nodes)
         matches = list(TOKEN.finditer(text))
         residue = TOKEN.sub('', text)
-        if '{{' in residue or '}}' in residue or re.search(r'<[A-Z_]{2,}(?:\s|$)', residue):
+        if '{{' in residue or '}}' in residue:
             raise RenderError(f'Incomplete placeholder near: {text[:160]}')
         replacements = []
         for match in matches:
             count += 1
             if count > 300:
                 raise RenderError('A document can contain at most 300 field occurrences.')
-            previous = text[:match.start()]
-            previous = TOKEN.split(previous)[-1]
-            field = field_definition(match.group(), count, previous)
+            field = field_definition(match.group())
             existing = fields.get(field['key'])
             if existing and existing != field:
                 raise RenderError(f'Field {field["key"]} is repeated with conflicting settings. Use identical tags or different names.')
@@ -216,8 +214,6 @@ def render_html(html, images=None):
     remaining = root.get_text()
     if TOKEN.search(remaining) or '{{' in remaining or '}}' in remaining:
         raise RenderError('A placeholder crosses a paragraph or unsupported layout boundary. Keep each complete tag inside one paragraph or table cell.')
-    if any(f['legacy'] for f in fields.values()):
-        warnings.append('Legacy tags are independent fields with automatically generated names. Use named tags for stable labels and shared values.')
     if any(f['type'] in {'signature', 'initials'} for f in fields.values()):
         warnings.append('Signatures and initials are saved when the client submits the agreement. A preparation-only review check does not submit it.')
     if not fields:
@@ -248,6 +244,9 @@ def validate_values(fields, values):
             continue
         key, kind = field['key'], field['type']
         value = values.get(key, False if kind == 'checkbox' else '')
+        if field.get('locked') and (key not in values or type(value) is not type(field.get('default')) or value != field['default']):
+            errors[key] = 'This field is locked to the prefilled answer. Ask the sender to revise the agreement if it is incorrect.'
+            continue
         if is_signing_date(field):
             continue  # Set and validated by the server at submission, never client-controlled.
         if kind == 'signature':
@@ -294,7 +293,7 @@ def validate_values(fields, values):
 
 DEMO_HTML = '''<h2>Harp performance agreement</h2>
 <p>Client: {{client.name|text|label=Client name}}</p>
-<p>Email: {{client.email|email}}</p><p>Phone: &lt;PHONE&gt;</p>
+<p>Email: {{client.email|email}}</p><p>Phone: {{client.phone|phone}}</p>
 <p>Event: {{event.type|select|options=Wedding;Corporate;Private event}}</p>
 <p>Date: {{event.date|date}} at {{event.start|time}}</p>
 <p>Attendees: {{event.attendees|number}}</p><p>Notes: {{event.notes|textarea|optional}}</p>

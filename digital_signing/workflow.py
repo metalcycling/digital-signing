@@ -92,7 +92,7 @@ def install_workflow(app, db, lock, static):
 
     def validate(payload, fields, role):
         if not payload.consent:
-            raise HTTPException(422, {'message':'Please confirm your agreement before signing.', 'errors':{}})
+            raise HTTPException(422, {'message':('Before submitting your countersignature and completing the agreement' if role == 'vendor' else 'Before submitting your answers and electronic signature to the vendor') + ', check the box to confirm that you have reviewed the agreement, agree to its terms, and intend to sign electronically.', 'errors':{}})
         selected = [dict(f, role='client') for f in fields if f['role'] == role]
         errors = validate_values(selected, payload.values)
         if errors:

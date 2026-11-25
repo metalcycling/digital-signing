@@ -36,7 +36,7 @@ def test_corrections_preserve_document_and_answers_but_require_fresh_signing(tmp
         assert 'Thank you!' not in content
         assert 'This private link expires in' in content
         assert email2['link'] in content
-    assert '<strong>30 days</strong>' in email2['html_body']
+    assert '<strong>7 days</strong>' in email2['html_body']
     assert '&lt;Suite 5&gt; &amp;' in email2['html_body']
     assert '<Suite 5>' not in email2['html_body']
     assert app.get(email['link']).status_code == 410
@@ -71,7 +71,7 @@ def test_corrections_preserve_document_and_answers_but_require_fresh_signing(tmp
     assert app.get(f'/api/contracts/{contract}/submissions/1/client.pdf').content == original_pdf
     with sqlite3.connect(tmp_path/'contracts-demo.sqlite3') as con:
         created,expiry = con.execute('SELECT created_at,expires_at FROM invitations WHERE version=2').fetchone()
-        assert datetime.fromisoformat(expiry)-datetime.fromisoformat(created) == timedelta(days=30)
+        assert datetime.fromisoformat(expiry)-datetime.fromisoformat(created) == timedelta(days=7)
 
 
 def test_corrections_validate_state_and_prevent_duplicate_revisions(tmp_path):
@@ -128,3 +128,36 @@ def test_correction_email_failure_keeps_revision_and_supports_outbox_retry(tmp_p
     mail = smtp.send_message.call_args.args[0]
     assert mail['To'] == RECIPIENT['recipient_email']
     assert 'Correct the address' in mail.get_body(preferencelist=('html',)).get_content()
+
+
+def test_locks_survive_corrections_and_are_enforced_for_both_signers(tmp_path):
+    app, _, base, payload = prepared(tmp_path)
+    with sqlite3.connect(tmp_path/'contracts-demo.sqlite3') as con:
+        snapshot = json.loads(con.execute('SELECT snapshot FROM renders').fetchone()[0])
+        field = next(f for f in snapshot['fields'] if f['key']=='client.email')
+        field.update(locked=True, default=payload['values']['client.email'])
+        snapshot['fields'].append({'key':'vendor.company','type':'text','role':'vendor','label':'Company','required':True,'options':[], 'default':'Bello Entertainment','locked':True})
+        con.execute('UPDATE renders SET snapshot=?', (json.dumps(snapshot),))
+    _, private = invitation(app,base)
+    tampered = {**payload,'values':{**payload['values'],'client.email':'changed@example.com'}}
+    for suffix, body in [('/validate',tampered['values']),('/submit',tampered)]:
+        result=app.post(private+'/1'+suffix,json=body,headers=HEADERS)
+        if suffix=='/validate':
+            assert not result.json()['valid']
+        else:
+            assert result.status_code==422
+    submitted=app.post(private+'/1/submit',json=payload,headers=HEADERS)
+    assert submitted.status_code==200,submitted.text
+    correction=app.post(base+'/1/request-corrections',json={'note':'Fix event details'},headers=HEADERS).json()
+    corrected='/api/sign/'+correction['email']['link'].split('/')[-1]+'/2'
+    assert next(f for f in app.get(corrected).json()['fields'] if f['key']=='client.email')['locked']
+    assert app.post(corrected+'/submit',json=tampered,headers=HEADERS).status_code==422
+    submitted=app.post(corrected+'/submit',json=payload,headers=HEADERS)
+    assert submitted.status_code==200,submitted.text
+    vendor=vendor_payload(submitted.json())
+    vendor['values']['vendor.company']='Changed company'
+    assert app.post(base+'/2/countersign',json=vendor,headers=HEADERS).status_code==422
+    vendor['values']['vendor.company']='Bello Entertainment'
+    final=app.post(base+'/2/countersign',json=vendor,headers=HEADERS)
+    assert final.status_code==200,final.text
+    assert final.json()['vendor']['values']['vendor.company']=='Bello Entertainment'

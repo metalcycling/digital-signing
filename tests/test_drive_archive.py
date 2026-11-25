@@ -89,7 +89,7 @@ def test_upload_uses_current_document_folder_and_exact_pdf_bytes():
     content=b'%PDF-final signed bytes'
     drive.save_final_pdf({'name':'Jane wedding','document_id':'doc'},3,'reserved',content)
     kwargs=files.create.call_args.kwargs
-    assert kwargs['body']=={'id':'reserved','name':'Jane wedding - v3 - Fully executed.pdf','mimeType':'application/pdf','parents':['current-folder']}
+    assert kwargs['body']=={'id':'reserved','name':'Jane wedding.pdf','mimeType':'application/pdf','parents':['current-folder']}
     assert kwargs['media_body'].getbytes(0,len(content))==content
     assert 'permissions' not in kwargs['body']
 

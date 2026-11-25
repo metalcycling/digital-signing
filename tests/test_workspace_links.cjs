@@ -41,3 +41,18 @@ test('older completed agreements save once before copying and reuse the link',as
   assert.equal(v.calls[1].options.method,'POST');
   assert.deepEqual(v.clipboard,['https://drive.google.com/file/d/pdf/view','https://drive.google.com/file/d/pdf/view']);
 });
+
+test('tag builder requires a prefill for locks and excludes signature locks',()=>{
+  const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false});return nodes.get(id);};
+  const source=fs.readFileSync('digital_signing/static/app.js','utf8');
+  const context=vm.createContext({$:get});
+  vm.runInContext(source.slice(source.indexOf('function buildTag()'),source.indexOf("for (const id of ['tag-key'")),context);
+  get('tag-key').value='client.price';get('tag-type').value='number';get('tag-role').value='client';get('tag-required').checked=true;get('tag-locked').checked=true;
+  vm.runInContext('buildTag()',context);
+  assert.equal(get('copy-tag').disabled,true);
+  get('tag-default').value='1000';vm.runInContext('buildTag()',context);
+  assert.equal(get('tag-output').textContent,'{{client.price|number|locked=true|default=1000}}');
+  get('tag-key').value='client.signature';get('tag-type').value='signature';vm.runInContext('buildTag()',context);
+  assert.equal(get('tag-locked-wrap').hidden,true);
+  assert.equal(get('tag-output').textContent,'{{client.signature|signature}}');
+});

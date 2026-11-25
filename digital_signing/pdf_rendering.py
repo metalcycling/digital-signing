@@ -151,7 +151,7 @@ def render_pdf(pdf_bytes, html, images=None):
             matches = matches_by_token[compact]
             # Repeating named fields in page headers/footers may produce additional PDF occurrences.
             same_key = len({t['key'] for t in source_tokens}) == 1
-            if len(matches) != len(source_tokens) and not (same_key and matches and not fields[source_tokens[0]['key']]['legacy']):
+            if len(matches) != len(source_tokens) and not (same_key and matches):
                 raise RenderError(f'Could not reliably place {source_tokens[0]["raw"]}: Google HTML contains {len(source_tokens)} occurrence(s), PDF contains {len(matches)}. Keep tags together and wait for Docs to save before rendering again.')
             for index, (page_index, match) in enumerate(matches):
                 token = source_tokens[min(index, len(source_tokens)-1)]

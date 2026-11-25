@@ -12,10 +12,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class EmailOptions(BaseModel):
     model_config = ConfigDict(extra='forbid')
     invitation_title: str = Field(default='{contract_name}', min_length=1, max_length=200)
-    invitation_body: str = Field(default='Hello {recipient_name},\n\nPlease review and sign the agreement for {contract_name} using the private link below. If you have any questions, please contact us before signing.\n\nThank you!\nBello Entertainment', min_length=1, max_length=10000)
+    invitation_body: str = Field(default='Hello {recipient_name},\n\nPlease review and sign the agreement for {invitation_subject} using the private link below. If you have any questions, please contact us before signing.\n\nThank you!\nBello Entertainment', min_length=1, max_length=10000)
     completion_body: str = Field(default='Hello {recipient_name},\n\nYour agreement for {contract_name} is fully executed. The final PDF, including both signatures, is attached for your records.\n\nThank you for choosing us. We look forward to working with you!\nBello Entertainment', min_length=1, max_length=10000)
-    signing_days: int = Field(default=30, ge=1, le=365, strict=True)
-    completion_days: int = Field(default=30, ge=1, le=365, strict=True)
+    signing_days: int = Field(default=7, ge=1, le=365, strict=True)
+    completion_days: int = Field(default=7, ge=1, le=365, strict=True)
+
+    @field_validator('invitation_body')
+    @classmethod
+    def invitation_personalization(cls, value):
+        # Saved invitation templates now follow the editable subject title.
+        return value.replace('{contract_name}', '{invitation_subject}')
 
     @field_validator('completion_body')
     @classmethod
@@ -48,19 +54,24 @@ def defaults(con):
     return options
 
 
-def message(template, name, contract, link, days):
+def message(template, name, contract, link, days, subject=None):
     # Substitute only supported names, preserving other braces as ordinary text.
     import re
-    text = re.sub(r'\{(recipient_name|contract_name)\}', lambda m: {'recipient_name':name,'contract_name':contract}[m[1]], template)
+    text = re.sub(r'\{(recipient_name|contract_name|invitation_subject)\}', lambda m: {'recipient_name':name,'contract_name':contract,'invitation_subject':subject if subject is not None else contract}[m[1]], template)
     return f'{text}\n\n{link}\n\nThis private link expires in {days} days. Keep it private; anyone with the link can access this agreement.'
 
 
-def html_message(template, name, contract, link, days):
-    parts = re.split(r'(\{(?:recipient_name|contract_name)\})', template)
+def agreement_link(link, label='Open agreement'):
+    return f'<p><a href="{html.escape(link, quote=True)}" style="display:inline-block;padding:16px 28px;background-color:#172d39;color:#ffffff;font-family:Arial,sans-serif;font-size:22px;font-weight:bold;line-height:1.4;text-decoration:underline;border-radius:6px;">{html.escape(label)}</a></p>'
+
+
+def html_message(template, name, contract, link, days, subject=None):
+    parts = re.split(r'(\{(?:recipient_name|contract_name|invitation_subject)\})', template)
     body = ''.join('<strong>'+html.escape(contract)+'</strong>' if part == '{contract_name}'
+                   else '<strong>'+html.escape(subject if subject is not None else contract)+'</strong>' if part == '{invitation_subject}'
                    else html.escape(name) if part == '{recipient_name}' else html.escape(part)
                    for part in parts).replace('\n', '<br>')
-    return f'<p>{body}</p><p><a href="{html.escape(link, quote=True)}">Open agreement</a></p><p>This private link expires in <strong>{days} days</strong>. Keep it private; anyone with the link can access this agreement.</p>'
+    return f'<p>{body}</p>{agreement_link(link)}<p>This private link expires in <strong>{days} days</strong>. Keep it private; anyone with the link can access this agreement.</p>'
 
 
 def queue_completion(con, contract_id, version, contract_name, signed_at, vendor_email):
@@ -75,7 +86,7 @@ def queue_completion(con, contract_id, version, contract_name, signed_at, vendor
                     (hashlib.sha256(token.encode()).hexdigest(), expires, contract_id, version))
     subject = f'Fully executed: {contract_name}'
     vendor_body = f'Hello,\n\nThe agreement for {contract_name} is fully executed. The final PDF, including both signatures, is attached for your records.\n\n{link}\n\nThank you,\nBello Entertainment'
-    vendor_html = f'<p>Hello,</p><p>The agreement for <strong>{html.escape(contract_name)}</strong> is fully executed. The final PDF, including both signatures, is attached for your records.</p><p><a href="{html.escape(link,quote=True)}">Open completed agreement</a></p><p>Thank you,<br>Bello Entertainment</p>'
+    vendor_html = f'<p>Hello,</p><p>The agreement for <strong>{html.escape(contract_name)}</strong> is fully executed. The final PDF, including both signatures, is attached for your records.</p>{agreement_link(link, "Open completed agreement")}<p>Thank you,<br>Bello Entertainment</p>'
     con.execute('INSERT INTO outbox (contract_id,version,kind,recipient_email,subject,body,link,created_at,html_body,attach_final_pdf) VALUES (?,?,?,?,?,?,?,?,?,1)',
                 (contract_id,version,'completed_vendor',vendor_email,subject,vendor_body,link,signed_at,vendor_html))
     if invite:

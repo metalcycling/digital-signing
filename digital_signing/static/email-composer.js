@@ -5,7 +5,7 @@
   panel.className = 'email-composer';
   panel.innerHTML = `
     <h3>Email messages</h3>
-    <p>Edit these messages for this agreement, or save them as your defaults for future agreements. The agreement name is filled in automatically; the greeting updates as you enter the client’s name. Saved defaults keep automatic personalization. The agreement name appears bold in the formatted previews below. The private link and expiration notice are added automatically.</p>
+    <p>Edit these messages for this agreement, or save them as your defaults for future agreements. The signature-request body uses the subject title you enter; the greeting updates as you enter the client’s name. Saved defaults keep automatic personalization. The subject title appears bold in the invitation; the agreement name appears bold in the completion email. The private link and expiration notice are added automatically.</p>
     <label for="invitation-title">Email subject</label>
     <div class="email-subject"><span>Signature request for</span><textarea id="invitation-title" name="agreement_subject_title" rows="1" autocomplete="off" maxlength="200" required aria-label="Subject title after Signature request for"></textarea></div>
     <label for="invitation-body">Signature request — greeting, message, and closing</label>
@@ -29,14 +29,14 @@
   const templates = {};
   let names = {recipient_name:'', contract_name:''};
   function segments(template) {
-    return template.split(/(\{(?:recipient_name|contract_name)\})/).filter(Boolean).map(raw => ({raw, text:/^\{(?:recipient_name|contract_name)\}$/.test(raw) ? names[raw.slice(1,-1)] || raw : raw}));
+    return template.split(/(\{(?:recipient_name|contract_name|invitation_subject)\})/).filter(Boolean).map(raw => ({raw, text:/^\{(?:recipient_name|contract_name|invitation_subject)\}$/.test(raw) ? names[raw.slice(1,-1)] || raw : raw}));
   }
   function preview(key) {
     if (key === 'invitation_title') return;
     const target = $(key === 'invitation_body' ? 'invitation-preview' : 'completion-preview');
     target.replaceChildren();
     for (const part of segments(templates[key])) {
-      const element = document.createElement(part.raw === '{contract_name}' ? 'strong' : 'span');
+      const element = document.createElement(['{contract_name}','{invitation_subject}'].includes(part.raw) ? 'strong' : 'span');
       element.textContent = part.text; target.append(element);
     }
   }
@@ -62,11 +62,23 @@
     templates[key] = slice(0,start) + after.slice(start,after.length-end) + slice(before.length-end,before.length);
   }
   const bodyKeys = ['invitation_title','invitation_body','completion_body'];
-  for (const key of bodyKeys) $(fields[key]).addEventListener('input', () => { if (templates[key] !== undefined) { capture(key); preview(key); } });
+  function updateSubject() {
+    capture('invitation_body');
+    names.invitation_subject = segments(templates.invitation_title).map(s => s.text).join('').trim();
+    paint('invitation_body');
+  }
+  for (const key of bodyKeys) $(fields[key]).addEventListener('input', () => {
+    if (templates[key] !== undefined) {
+      capture(key);
+      if (key === 'invitation_title') updateSubject();
+      else preview(key);
+    }
+  });
   $('recipient-name').addEventListener('input', () => {
     if (!templates.invitation_body) return;
     for (const key of bodyKeys) capture(key);
     names.recipient_name = $('recipient-name').value.trim();
+    names.invitation_subject = segments(templates.invitation_title).map(s => s.text).join('').trim();
     for (const key of bodyKeys) paint(key);
   });
   function values() {
@@ -86,9 +98,9 @@
     $('send-confirm').textContent = delivery.mode === 'gmail' ? 'Send email' : 'Create test email';
     $('send-mode-note').textContent = delivery.mode === 'gmail' ? 'This sends a real email through Gmail. Localhost links open only on this computer.' : 'Local test: the email will appear in the outbox. No email will be sent.';
     const data = await request();
-    names = {recipient_name:$('recipient-name').value.trim(), contract_name:contractName};
+    names = {recipient_name:$('recipient-name').value.trim(), contract_name:contractName, invitation_subject:''};
     for (const [key,id] of Object.entries(fields)) {
-      if (!key.endsWith('_days')) { templates[key] = key === 'invitation_title' ? '' : data[key]; paint(key); }
+      if (!key.endsWith('_days')) { templates[key] = key === 'invitation_title' ? '' : key === 'invitation_body' ? data[key].replaceAll('{contract_name}', '{invitation_subject}') : data[key]; paint(key); }
       else $(id).value = data[key];
     }
     $('email-defaults-status').textContent = '';

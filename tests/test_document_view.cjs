@@ -21,7 +21,7 @@ class Element {
   reportValidity() { return true; }
   getBoundingClientRect() { return {left:0, right:300, top:0, bottom:50, width:300, height:50}; }
 }
-async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
+async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, lockedFields=[], closeBlocked=false, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
   const elements = new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('zoom').value = 'fit';
@@ -37,7 +37,10 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
   ];
   const vendorField = {key:'vendor.signature',type:'signature',role:'vendor',label:'Vendor signature',required:true};
   if (placed) fields.push(vendorField);
-  for (const field of fields) if (Object.hasOwn(defaults,field.key)) field.default=defaults[field.key];
+  for (const field of fields) {
+    if (Object.hasOwn(defaults,field.key)) field.default=defaults[field.key];
+    if (lockedFields.includes(field.key)) field.locked=true;
+  }
   const placement = key => ({key,box:[10,10,100,20],font_size:12,masks:[]});
   const snapshot = {name:'Test contract',version:1,fields,prefill_values:prefills,correction_note:correctionNote,created_at:'2026-11-17',warnings:[],pages:[
     {width:600,height:800,placements:fields.map(f=>placement(f.key)),text:'Page one',image_url:'/1.png'},
@@ -49,7 +52,8 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
   const context=vm.createContext({
     document:{getElementById:get,createElement:()=>new Element(),body:new Element(),addEventListener() {}},
     location:{pathname:recipient?'/sign/private-token':vendor?'/countersign/test':'/preview/test',search:recipient||review?'?review=1':''},
-    window:{SignatureEditor:class {open() {}},addEventListener() {}},
+    window:{SignatureEditor:class {open() {}},addEventListener() {},closed:false,close(){this.closeCalls=(this.closeCalls||0)+1;if(!closeBlocked)this.closed=true;}},
+    setTimeout(fn){fn();},
     URLSearchParams, Option:class { constructor(text,value) {this.text=text;this.value=value;} }, ResizeObserver:class {observe() {}},setInterval() {},
     fetch:async (url, options) => {
       calls.push({url,options});
@@ -111,7 +115,8 @@ test('client submission opens an accessible confirmation and dismissal does not 
   assert.equal(v.get('receipt-download').hidden,true);
   v.get('signing-success-close').events.click();
   v.run('applyWorkflow(workflow)');
-  assert.equal(v.get('signing-success-dialog').open,false);
+  assert.equal(v.context.window.closed,true);
+  assert.equal(v.context.window.closeCalls,1);
   assert.equal(v.calls.filter(c=>c.url.endsWith('/submit')).length,1);
 });
 
@@ -187,7 +192,7 @@ test('review page sends its exact version without navigating away and then locks
   assert.equal(v.get('send-dialog').open,false);
   assert.equal(v.get('sent-client-link').href,'/sign/new-private-token');
   assert.equal(v.get('review-send').hidden,true);
-  assert.equal(v.get('rerender').disabled,true);
+  assert.equal(v.run('controls.every(c=>c.input.disabled)'),true);
 });
 test('sent reviews are locked but recipient can still complete the sent contract',async()=>{
   const review=await viewer({vendor:false,review:true,state:'editable',sent:true});
@@ -210,7 +215,8 @@ test('successful Gmail send shows a dismissible confirmation without sending aga
   v.run('applyWorkflow(workflow)');
   assert.equal(v.get('signing-success-title').textContent,'The agreement has been sent to the client.');
   v.get('signing-success-close').events.click();
-  assert.equal(v.get('signing-success-dialog').open,false);
+  assert.equal(v.context.window.closed,true);
+  assert.equal(v.context.window.closeCalls,1);
   assert.equal(v.calls.filter(c=>c.url.endsWith('/send')).length,1);
 });
 
@@ -439,4 +445,39 @@ test('defaults prefill editable fields, with correction and saved answers taking
   assert.equal(revised.run("values['client.start']"),'15:45');
   const submitted=await viewer({vendor:false,state:'awaiting_vendor',defaults});
   assert.equal(submitted.run("values['client.name']"),'Jane Smith');
+});
+
+test('blocked tab closure keeps the confirmation and explains manual closure',async()=>{
+  const v=await viewer({vendor:false,state:'editable',closeBlocked:true});
+  v.run('showPage(1,false)');v.get('signing-consent').checked=true;
+  await v.get('preview-form').events.submit({preventDefault(){}});
+  v.get('signing-success-close').events.click();
+  assert.equal(v.context.window.closeCalls,1);
+  assert.equal(v.context.window.closed,false);
+  assert.equal(v.get('signing-success-dialog').open,true);
+  assert.match(v.get('signing-success-description').textContent,/close it manually/);
+  v.run('applyWorkflow(workflow)');
+  assert.match(v.get('signing-success-description').textContent,/close it manually/);
+});
+
+test('unchecked consent explains submission for each role and never sends',async()=>{
+  for(const vendor of [false,true]){
+    const v=await viewer({vendor,state:vendor?'awaiting_vendor':'editable'});
+    v.run('showPage(1,false)');
+    await v.get('preview-form').events.submit({preventDefault(){}});
+    assert.match(v.get('preview-notice').textContent,vendor?/countersignature and completing/:/answers and electronic signature to the vendor/);
+    assert.match(v.get('preview-notice').textContent,/check the box/);
+    assert.equal(v.calls.filter(c=>c.options?.method==='POST').length,0);
+  }
+});
+
+test('locked defaults are visible but uneditable and correction prefills cannot replace them',async()=>{
+  const v=await viewer({vendor:false,state:'editable',defaults:{'client.provided_name':'Fixed name','client.start':'14:30'},lockedFields:['client.provided_name','client.start'],prefills:{'client.provided_name':'Changed'}});
+  assert.equal(v.run("values['client.provided_name']"),'Fixed name');
+  for(const key of ['client.provided_name','client.start']){
+    assert.equal(v.run(`controls.find(c=>c.key==='${key}').input.disabled`),true);
+    v.run(`focusField('${key}')`);
+    assert.equal(v.run('floating'),null);
+  }
+  assert.equal(v.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
 });

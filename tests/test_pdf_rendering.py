@@ -45,11 +45,11 @@ def test_generic_layout_preserves_page_sizes_images_and_repeated_fields():
 def test_field_expansion_stops_before_text_or_table_boundary():
     def draw(canvas):
         canvas.setFont('Helvetica', 10)
-        canvas.drawString(60, 650, '<TEXT>')
+        canvas.drawString(60, 650, '{{a}}')
         canvas.drawString(135, 650, 'Protected neighboring text')
-        canvas.drawString(300, 650, '<DATE>')
+        canvas.drawString(300, 650, '{{b|date}}')
         canvas.line(360, 645, 360, 665)
-    snapshot, _ = render_pdf(make_pdf(draw), '<p>&lt;TEXT&gt; Protected neighboring text</p><p>&lt;DATE&gt;</p>')
+    snapshot, _ = render_pdf(make_pdf(draw), '<p>{{a}} Protected neighboring text</p><p>{{b|date}}</p>')
     a, b = snapshot['pages'][0]['placements']
     assert a['box'][0] + a['box'][2] <= 133.1
     assert b['box'][0] + b['box'][2] <= 358.1
@@ -97,11 +97,11 @@ def test_long_defaults_get_room_but_remain_bounded_by_nearby_content():
     def draw(canvas):
         canvas.setFont('Helvetica', 10)
         canvas.drawString(40, 700, tag)
-        canvas.drawString(40, 650, '<TEXT>')
+        canvas.drawString(40, 650, '{{a}}')
         canvas.drawString(110, 650, 'Neighbor stays visible')
-        canvas.drawString(300, 650, '<TEXT>')
+        canvas.drawString(300, 650, '{{b}}')
         canvas.drawImage(ImageReader(Image.new('RGB', (10, 10), '#aa2244')), 360, 645, 20, 20)
-    snapshot, _ = render_pdf(make_pdf(draw), f'<p>{tag}</p><p>&lt;TEXT&gt;</p><p>&lt;TEXT&gt;</p>')
+    snapshot, _ = render_pdf(make_pdf(draw), f'<p>{tag}</p><p>{{{{a}}}}</p><p>{{{{b}}}}</p>')
     address_field, neighbor, image = snapshot['pages'][0]['placements']
     assert address_field['box'][2] >= pdfmetrics.stringWidth(address, 'Helvetica', 10) + 8
     assert address_field['box'][2] < address_field['masks'][0]['box'][2]

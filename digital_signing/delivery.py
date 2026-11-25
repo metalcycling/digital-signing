@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from digital_signing.workflow import SigningInput
-from digital_signing.email_messages import EmailOptions, defaults, message, html_message
+from digital_signing.email_messages import agreement_link, EmailOptions, defaults, message, html_message
 from digital_signing.rendering import validate_values
 from digital_signing.signing_rules import is_signing_date
 
@@ -124,14 +124,14 @@ def install_delivery(app, db, lock, static, handlers, asset):
         title = re.sub(r'\{(recipient_name|contract_name)\}', lambda m: {'recipient_name':payload.recipient_name,'contract_name':contract['name']}[m[1]], options.invitation_title)
         title = title.replace('\r',' ').replace('\n',' ')
         subject = ('Corrections requested for ' if note else 'Signature request for ') + title
-        body = message(options.invitation_body,payload.recipient_name,contract['name'],link,options.signing_days)
-        formatted = html_message(options.invitation_body,payload.recipient_name,contract['name'],link,options.signing_days)
+        body = message(options.invitation_body,payload.recipient_name,contract['name'],link,options.signing_days,subject=title)
+        formatted = html_message(options.invitation_body,payload.recipient_name,contract['name'],link,options.signing_days,subject=title)
         if note:
             intro = 'Please correct the answers below, review the agreement, and sign again. Your previous answers are already filled in.'
             body = intro + '\n\nRequested corrections:\n' + note + message('',payload.recipient_name,contract['name'],link,options.signing_days)
             formatted = ('<p>' + intro + '</p><p><strong>Requested corrections</strong><br>'
                          + html.escape(note).replace('\n','<br>') + '</p>'
-                         + f'<p><a href="{html.escape(link, quote=True)}">Open agreement</a></p>'
+                         + agreement_link(link)
                          + f'<p>This private link expires in <strong>{options.signing_days} days</strong>. Keep it private; anyone with the link can access this agreement.</p>')
         con.execute('INSERT INTO outbox (contract_id,version,kind,recipient_email,subject,body,link,created_at,html_body) VALUES (?,?,?,?,?,?,?,?,?)', (contract_id,version,'invitation',payload.recipient_email,subject,body,link,now.isoformat(),formatted))
         if app.state.email_mode == 'gmail':

@@ -17,10 +17,10 @@ def export(html):
     return stream.getvalue()
 
 
-def test_split_runs_tables_repeated_fields_and_legacy_tags():
+def test_split_runs_tables_and_repeated_named_fields():
     result = render_html('<p>Name: <b>{{client.</b><i>name|text}}</i>!</p>'
-                         '<table><tr><td>{{client.name|text}}</td><td>Date: &lt;DATE&gt;</td></tr></table>'
-                         '<p>Venue: &lt;TEXT&gt;; Address: &lt;TEXT&gt;</p>')
+                         '<table><tr><td>{{client.name|text}}</td><td>Date: {{event.date|date|label=Date}}</td></tr></table>'
+                         '<p>Venue: {{event.venue}}; Address: {{event.address}}</p>')
     assert len(result['fields']) == 4
     assert result['occurrences'] == 5
     assert result['fields'][1]['label'] == 'Date'
@@ -29,13 +29,13 @@ def test_split_runs_tables_repeated_fields_and_legacy_tags():
     assert len(soup.select('[data-field-key="client.name"]')) == 2
     assert soup.table is not None
     assert 'Name: ' in soup.get_text() and '!' in soup.get_text()
-    assert '{{' not in result['html'] and '&lt;DATE&gt;' not in result['html']
+    assert '{{' not in result['html'] and '{{event.date|date|label=Date}}' not in result['html']
 
 
 @pytest.mark.parametrize('tag', [
     '{{event.date|bogus}}', '{{Bad Name|text}}', '{{event.type|select}}',
     '{{event.type|select|options=A;A}}', '{{client.name|text|surprise=yes}}',
-    '{{client.name|text|optional|required}}', '{{client.name|text', '&lt;DATTE&gt;',
+    '{{client.name|text|optional|required}}', '{{client.name|text', '{{date|datte}}',
 ])
 def test_bad_tags_block_render(tag):
     with pytest.raises(RenderError): render_html(f'<p>{tag}</p>')
@@ -122,29 +122,29 @@ def test_demo_renders_without_google_and_reports_no_fields(tmp_path):
 
 def test_other_event_requires_description_and_does_not_relax_unrelated_selects():
     from digital_signing.rendering import field_definition, validate_values
-    event = field_definition('{{client.type_of_event|select|options=Wedding;Corporate}}',1,'')
+    event = field_definition('{{client.type_of_event|select|options=Wedding;Corporate}}')
     assert not validate_values([event],{'client.type_of_event':'Other: Graduation party'})
     for invalid in ['Other','Other:','Other:   ','Graduation party','Other: '+'x'*151]:
         assert validate_values([event],{'client.type_of_event':invalid})
-    other = field_definition('{{client.package|select|options=Basic;Premium}}',2,'')
+    other = field_definition('{{client.package|select|options=Basic;Premium}}')
     assert validate_values([other],{'client.package':'Other: Custom'})
-    enabled = field_definition('{{client.package|select|options=Basic;Premium|other}}',2,'')
+    enabled = field_definition('{{client.package|select|options=Basic;Premium|other}}')
     assert not validate_values([enabled],{'client.package':'Other: Custom'})
 
 
 def test_explicit_dropdown_other_setting_overrides_legacy_inference():
     from digital_signing.rendering import field_definition, allows_other
-    closed = field_definition('{{client.event_type|select|label=Type of event|options=Wedding;Corporate|other=false}}',1,'')
+    closed = field_definition('{{client.event_type|select|label=Type of event|options=Wedding;Corporate|other=false}}')
     assert closed['allow_other'] is False
     assert not allows_other(closed)
     assert not validate_values([closed], {'client.event_type':'Wedding'})
     assert validate_values([closed], {'client.event_type':'Other: Birthday'})
-    opened = field_definition('{{client.setting|select|options=Indoors;Outdoors|other=true}}',2,'')
+    opened = field_definition('{{client.setting|select|options=Indoors;Outdoors|other=true}}')
     assert allows_other(opened)
     assert not validate_values([opened], {'client.setting':'Other: Covered terrace'})
     assert validate_values([opened], {'client.setting':'Other: '})
     assert validate_values([opened], {'client.setting':'Other'})
-    literal = field_definition('{{client.setting|select|options=Indoors;Other|other=false}}',3,'')
+    literal = field_definition('{{client.setting|select|options=Indoors;Other|other=false}}')
     assert not allows_other(literal)
     assert not validate_values([literal], {'client.setting':'Other'})
     assert validate_values([literal], {'client.setting':'Other: Terrace'})
@@ -213,3 +213,32 @@ def test_default_is_not_a_submission_fallback_or_consent():
     assert not validate_values([checkbox], {'client.checked':True})
     with pytest.raises(RenderError, match='conflicting'):
         render_html('<p>{{client.name|text|default=Jane}}</p><p>{{client.name|text|default=John}}</p>')
+
+
+@pytest.mark.parametrize('tag', [
+    '{{client.price|number|default=1000|locked=true}}',
+    '{{client.provided_name|default=Jane|locked}}',
+    '{{client.choice|select|options=A;B|default=A|locked=true}}',
+    '{{vendor.checked|checkbox|optional|default=false|locked=true}}',
+])
+def test_locked_values_cannot_be_changed_or_omitted(tag):
+    field = dict(render_html('<p>'+tag+'</p>')['fields'][0], role='client')
+    assert field['locked']
+    assert not validate_values([field], {field['key']:field['default']})
+    for value in ['changed', '', True, {'value':field['default']}]:
+        assert validate_values([field], {field['key']:value})
+    assert validate_values([field], {})
+
+
+@pytest.mark.parametrize('tag', [
+    '{{client.price|number|locked=true}}',
+    '{{client.checked|checkbox|default=false|locked=true}}',
+    '{{client.signature|signature|locked=true}}',
+    '{{client.initials|initials|locked=true}}',
+    '{{client.signing_date|signing_date|locked=true}}',
+    '{{client.name|default=Jane|locked=maybe}}',
+    '{{client.name|default=Jane|locked=true|locked=false}}',
+])
+def test_invalid_locks_fail_at_render_time(tag):
+    with pytest.raises(RenderError):
+        render_html('<p>'+tag+'</p>')
