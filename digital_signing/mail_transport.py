@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
+from digital_signing.email_messages import agreement_link
+
 
 def credentials(settings):
     path = settings.data_dir / 'gmail-credentials.json'
@@ -142,7 +144,7 @@ def install_mail(app, db, lock, settings):
         contract_id, version = snapshot['contract_id'], snapshot['version']
         link = f'/countersign/{contract_id}?version={version}'
         text = f"Hello,\n\n{client['signer_name']} has signed {snapshot['name']} (version {version}).\n\nPlease review the client's completed answers and add your signature:\n\n{link}\n\nThank you,\nBello Entertainment"
-        formatted = f"<p>Hello,</p><p>{html.escape(client['signer_name'])} has signed <strong>{html.escape(snapshot['name'])}</strong> (version {version}).</p><p>Please review the client's completed answers and add your signature.</p><p><a href=\"{html.escape(link, quote=True)}\">Review &amp; countersign</a></p><p>Thank you,<br>Bello Entertainment</p>"
+        formatted = f"<p>Hello,</p><p>{html.escape(client['signer_name'])} has signed <strong>{html.escape(snapshot['name'])}</strong> (version {version}).</p><p>Please review the client's completed answers and add your signature.</p>{agreement_link(link, 'Review & countersign')}<p>Thank you,<br>Bello Entertainment</p>"
         con.execute('INSERT INTO outbox (contract_id,version,kind,recipient_email,subject,body,link,created_at,html_body,delivery_status) VALUES (?,?,?,?,?,?,?,?,?,?)',
                     (contract_id,version,'vendor_alert',recipient,f"Ready for your signature: {snapshot['name']}",text,link,client['signed_at'],formatted,'pending' if settings.email_mode=='gmail' else 'local'))
 
