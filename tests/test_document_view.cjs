@@ -21,7 +21,7 @@ class Element {
   reportValidity() { return true; }
   getBoundingClientRect() { return {left:0, right:300, top:0, bottom:50, width:300, height:50}; }
 }
-async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, validationErrors=null, submissionError=false, deliveryError=null}={}) {
+async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
   const elements = new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('zoom').value = 'fit';
@@ -61,7 +61,10 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
         if (submissionError) return {ok:false,json:async()=>({detail:'Unable to save the signature.'})};
         if (deliveryError) data.email_delivery={error:deliveryError};
       }
-      if (url.endsWith('/send')) data = {link:'/sign/new-private-token'};
+      if (url.endsWith('/send')) {
+        if (sendError) return {ok:false,json:async()=>({detail:'Unable to create the invitation.'})};
+        data = {link:'/sign/new-private-token',delivery_status:sendStatus,delivery_error:deliveryError};
+      }
       if (url === '/api/email-delivery') data = {mode:'local'};
       if (url.endsWith('/request-corrections')) data = {version:2,email:{link:'/sign/corrected',delivery_status:'local'}};
       return {ok:true,json:async()=>data};
@@ -193,6 +196,56 @@ test('sent reviews are locked but recipient can still complete the sent contract
   const recipient=await viewer({vendor:false,recipient:true,state:'editable',sent:true});
   assert.equal(recipient.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
   assert.equal(recipient.get('review-send').hidden,true);
+});
+
+test('successful Gmail send shows a dismissible confirmation without sending again',async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable',sendStatus:'sent'});
+  await v.get('review-send').events.click();
+  await v.get('send-form').events.submit({preventDefault(){}});
+  assert.equal(v.get('send-dialog').open,false);
+  assert.equal(v.get('signing-success-dialog').open,true);
+  assert.equal(v.get('signing-success-dialog').dataset.tone,'success');
+  assert.equal(v.get('signing-success-title').textContent,'The agreement has been sent to the client.');
+  assert.equal(v.get('signing-success-description').textContent,'You’ll be notified when the client signs. You may close this window now.');
+  v.run('applyWorkflow(workflow)');
+  assert.equal(v.get('signing-success-title').textContent,'The agreement has been sent to the client.');
+  v.get('signing-success-close').events.click();
+  assert.equal(v.get('signing-success-dialog').open,false);
+  assert.equal(v.calls.filter(c=>c.url.endsWith('/send')).length,1);
+});
+
+test('local test email confirmation explicitly says no email was sent',async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable',sendStatus:'local'});
+  await v.get('review-send').events.click();
+  await v.get('send-form').events.submit({preventDefault(){}});
+  assert.equal(v.get('signing-success-dialog').open,true);
+  assert.equal(v.get('signing-success-dialog').dataset.tone,'info');
+  assert.match(v.get('signing-success-description').textContent,/No email was sent/);
+});
+
+test('unconfirmed email delivery gets a warning popup, never a sent confirmation',async()=>{
+  for (const sendStatus of ['failed','unknown','pending',null]) {
+    const v=await viewer({vendor:false,review:true,state:'editable',sendStatus,deliveryError:'Check Gmail Sent before retrying.'});
+    await v.get('review-send').events.click();
+    await v.get('send-form').events.submit({preventDefault(){}});
+    assert.equal(v.get('signing-success-dialog').open,true);
+    assert.equal(v.get('signing-success-dialog').dataset.tone,'warning');
+    assert.equal(v.get('signing-success-title').textContent,'Email delivery needs attention.');
+    assert.match(v.get('signing-success-description').textContent,/delivery has not been confirmed/);
+    assert.match(v.get('signing-success-warning').textContent,/Check Gmail Sent/);
+    assert.equal(v.get('signing-success-warning').hidden,false);
+    assert.equal(v.get('review-send').hidden,true);
+  }
+});
+
+test('invitation creation failure keeps the send form open without a confirmation',async()=>{
+  const v=await viewer({vendor:false,review:true,state:'editable',sendError:true});
+  await v.get('review-send').events.click();
+  await v.get('send-form').events.submit({preventDefault(){}});
+  assert.equal(v.get('send-dialog').open,true);
+  assert.notEqual(v.get('signing-success-dialog').open,true);
+  assert.match(v.get('send-error').textContent,/Unable to create/);
+  assert.equal(v.get('send-confirm').disabled,false);
 });
 
 test('sending prefills exact recipient tags before personalizing the email', async()=>{

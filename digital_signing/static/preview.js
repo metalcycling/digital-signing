@@ -383,14 +383,38 @@ function updateSigningConfirmation(state) {
   $('signing-success-title').textContent = message.title;
   $('signing-success-description').textContent = message.description;
 }
-function showSigningConfirmation(state, warning) {
-  if (isReview || state.superseded || !['awaiting_vendor','completed'].includes(state.state)) return;
+function showConfirmation({title, description, warning='', kind='signing', tone='success'}) {
   const dialog = $('signing-success-dialog');
   if (!dialog) return;
-  updateSigningConfirmation(state);
+  dialog.dataset.confirmationKind = kind;
+  dialog.dataset.tone = tone;
+  $('signing-success-title').textContent = title;
+  $('signing-success-description').textContent = description;
+  if ($('signing-success-icon')) $('signing-success-icon').textContent = tone === 'warning' ? '!' : tone === 'info' ? 'i' : '✓';
   $('signing-success-warning').textContent = warning;
   $('signing-success-warning').hidden = !warning;
   if (!dialog.open) dialog.showModal();
+}
+function showSigningConfirmation(state, warning) {
+  if (isReview || state.superseded || !['awaiting_vendor','completed'].includes(state.state)) return;
+  showConfirmation({...signingConfirmation(state), warning});
+}
+function sendingConfirmation(email) {
+  if (email.delivery_status === 'sent') return {
+    title:'The agreement has been sent to the client.',
+    description:'You’ll be notified when the client signs. You may close this window now.',
+    tone:'success',
+  };
+  if (email.delivery_status === 'local') return {
+    title:'Test email created.',
+    description:'No email was sent. The invitation is available in the local email outbox.',
+    tone:'info',
+  };
+  return {
+    title:'Email delivery needs attention.',
+    description:'The invitation has been saved, but email delivery has not been confirmed. Check the email outbox before retrying.',
+    warning:email.delivery_error || '', tone:'warning',
+  };
 }
 $('signing-success-close')?.addEventListener('click', () => $('signing-success-dialog').close());
 function applyWorkflow(state) {
@@ -425,7 +449,7 @@ function applyWorkflow(state) {
   const link = state.final_pdf_url || state.client_pdf_url;
   $('receipt-download').hidden = awaitingVendor || !link;
   if (link) $('receipt-download').href = link;
-  if ($('signing-success-dialog')?.open && !state.superseded) updateSigningConfirmation(state);
+  if ($('signing-success-dialog')?.open && $('signing-success-dialog').dataset.confirmationKind === 'signing' && !state.superseded) updateSigningConfirmation(state);
 }
 function drawDocument() {
   if (snapshot.pages) drawPages(); else drawLegacy();
@@ -556,9 +580,11 @@ $('send-form').addEventListener('submit', async event => {
     applyWorkflow({...workflow, sent:true}); dirty = false;
     $('send-dialog').close(); $('send-result').hidden = false;
     $('sent-client-link').href = email.link;
-    $('send-result-title').textContent = email.delivery_status === 'sent' ? 'Email sent via Gmail' : email.delivery_status === 'local' || !email.delivery_status ? 'Test email created' : 'Email needs attention';
-    $('send-result-description').textContent = email.delivery_status === 'sent' ? 'Gmail accepted the invitation. Check the recipient inbox or spam folder.' : email.delivery_error || 'The invitation is saved in the local outbox. No email was sent.';
+    const confirmation = sendingConfirmation(email);
+    $('send-result-title').textContent = confirmation.title;
+    $('send-result-description').textContent = [confirmation.description,confirmation.warning].filter(Boolean).join(' ');
     $('send-result').scrollIntoView({behavior:'smooth',block:'center'});
+    showConfirmation({...confirmation, kind:'sending'});
   } catch(error) { $('send-error').textContent = error.message; }
   finally { sending = false; $('send-confirm').disabled = false; $('send-cancel').disabled = false; }
 });

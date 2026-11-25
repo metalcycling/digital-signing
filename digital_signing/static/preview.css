@@ -86,3 +86,7 @@
 .signing-success-dialog .signing-success-warning{padding:12px;border:1px solid #d4b47b;border-radius:6px;background:#fff6e7;color:#734b19;font-size:14px;text-align:left;overflow-wrap:anywhere}
 .signing-success-dialog [hidden]{display:none!important}
 @media(max-width:480px){.signing-success-dialog{padding:28px 22px}.signing-success-dialog h2{font-size:25px}.signing-success-dialog p{font-size:16px}}
+
+.signing-success-dialog[data-tone="warning"]{border-top-color:#95651b}
+.signing-success-dialog[data-tone="warning"] .signing-success-icon{background:#95651b}
+.signing-success-dialog[data-tone="info"] .signing-success-icon{background:#4e6875}
