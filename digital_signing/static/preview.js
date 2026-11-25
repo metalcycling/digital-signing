@@ -161,7 +161,7 @@ function makeInput(field, onDocument = false) {
   } else {
     input = document.createElement('input');
     input.type = ({phone:'tel', initials:'text', signature:'text'})[field.type] || field.type;
-    if (field.type === 'number') input.step = 'any';
+    if (field.type === 'number') { input.step = 'any'; input.min = '0'; input.inputMode = 'decimal'; input.classList.add('number-field'); }
     input.maxLength = field.type === 'initials' ? 12 : field.type === 'signature' ? 200 : 5000;
   }
   input.id = `field-${++serial}`; input.name = field.key;
@@ -490,6 +490,7 @@ $('preview-form').addEventListener('submit', async (event) => {
     if (!versions.length) throw new Error('No saved render yet. Return to the workspace and click Render Agreement.');
     const requested = new URLSearchParams(location.search).get('version') || versions[0].version;
     snapshot = await api(`${base}/${encodeURIComponent(requested)}`);
+    for (const field of snapshot.fields) if (field.type === 'time') field.label = ({'Client start time':'Event starting time', 'Client end time':'Event ending time'})[field.label] || field.label;
     workflow = await api(`${base}/${snapshot.version}/workflow`);
     locked = isLocked(workflow);
     for (const field of snapshot.fields) {

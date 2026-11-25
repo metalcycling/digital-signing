@@ -122,6 +122,8 @@ def field_definition(raw):
         errors = validate_values([dict(field, role='client')], {key:field['default']})
         if errors:
             raise RenderError(f'Invalid locked answer for {key}: {errors[key]}')
+    if field_type == 'time':
+        field['label'] = {'Client start time':'Event starting time', 'Client end time':'Event ending time'}.get(field['label'], field['label'])
     return field
 
 
@@ -271,8 +273,12 @@ def validate_values(fields, values):
                 errors[key] = 'This field is required.'
             continue
         try:
-            if kind == 'number' and not Decimal(value).is_finite():
-                raise ValueError()
+            if kind == 'number':
+                if not re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?', value):
+                    raise ValueError()
+                number = Decimal(value)
+                if not number.is_finite() or number < 0:
+                    raise ValueError()
             if kind == 'date':
                 if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value): raise ValueError()
                 date.fromisoformat(value)
@@ -287,7 +293,7 @@ def validate_values(fields, values):
                 if not custom and (value not in field['options'] or (allows_other(field) and value.lower()=='other')): raise ValueError()
             if kind == 'initials' and len(value) > 12: raise ValueError()
         except (ValueError, InvalidOperation):
-            errors[key] = f'Enter a valid {kind} value.'
+            errors[key] = 'Enter a number that is zero or greater.' if kind == 'number' else f'Enter a valid {kind} value.'
     return errors
 
 

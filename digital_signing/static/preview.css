@@ -87,3 +87,6 @@
 .signing-success-dialog[data-tone="warning"]{border-top-color:#95651b}
 .signing-success-dialog[data-tone="warning"] .signing-success-icon{background:#95651b}
 .signing-success-dialog[data-tone="info"] .signing-success-icon{background:#4e6875}
+
+.number-field[type=number]{appearance:textfield;-moz-appearance:textfield}
+.number-field[type=number]::-webkit-inner-spin-button,.number-field[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}

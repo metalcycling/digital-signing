@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class EmailOptions(BaseModel):
     model_config = ConfigDict(extra='forbid')
     invitation_title: str = Field(default='{contract_name}', min_length=1, max_length=200)
-    invitation_body: str = Field(default='Hello {recipient_name},\n\nPlease review and sign the agreement for {invitation_subject} using the private link below. If you have any questions, please contact us before signing.\n\nThank you!\nBello Entertainment', min_length=1, max_length=10000)
+    invitation_body: str = Field(default='Hello {recipient_name},\n\nPlease review and sign the agreement for {invitation_subject} by clicking the button below. If you have any questions, please contact us before signing.\n\nThank you!\nBello Entertainment', min_length=1, max_length=10000)
     completion_body: str = Field(default='Hello {recipient_name},\n\nYour agreement for {contract_name} is fully executed. The final PDF, including both signatures, is attached for your records.\n\nThank you for choosing us. We look forward to working with you!\nBello Entertainment', min_length=1, max_length=10000)
     signing_days: int = Field(default=7, ge=1, le=365, strict=True)
     completion_days: int = Field(default=7, ge=1, le=365, strict=True)
@@ -21,7 +21,7 @@ class EmailOptions(BaseModel):
     @classmethod
     def invitation_personalization(cls, value):
         # Saved invitation templates now follow the editable subject title.
-        return value.replace('{contract_name}', '{invitation_subject}')
+        return value.replace('{contract_name}', '{invitation_subject}').replace('using the private link below.', 'by clicking the button below.')
 
     @field_validator('completion_body')
     @classmethod

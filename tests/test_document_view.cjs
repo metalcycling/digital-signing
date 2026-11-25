@@ -21,7 +21,7 @@ class Element {
   reportValidity() { return true; }
   getBoundingClientRect() { return {left:0, right:300, top:0, bottom:50, width:300, height:50}; }
 }
-async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, lockedFields=[], closeBlocked=false, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
+async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, labels={}, lockedFields=[], closeBlocked=false, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
   const elements = new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('zoom').value = 'fit';
@@ -39,6 +39,7 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
   if (placed) fields.push(vendorField);
   for (const field of fields) {
     if (Object.hasOwn(defaults,field.key)) field.default=defaults[field.key];
+    if (Object.hasOwn(labels,field.key)) field.label=labels[field.key];
     if (lockedFields.includes(field.key)) field.locked=true;
   }
   const placement = key => ({key,box:[10,10,100,20],font_size:12,masks:[]});
@@ -480,4 +481,15 @@ test('locked defaults are visible but uneditable and correction prefills cannot 
     assert.equal(v.run('floating'),null);
   }
   assert.equal(v.run("controls.find(c=>c.key==='client.name').input.disabled"),false);
+});
+
+test('numbers have a nonnegative minimum and existing time labels use event wording',async()=>{
+  const v=await viewer({vendor:false,state:'editable',labels:{'client.start':'Client start time'}});
+  const number=v.run("makeInput({key:'client.amount',type:'number',role:'client',required:true,label:'Amount'})");
+  assert.equal(number.type,'number');
+  assert.equal(number.min,'0');
+  assert.equal(number.step,'any');
+  assert.equal(number.inputMode,'decimal');
+  assert.equal(v.run("definition('client.start').label"),'Event starting time');
+  assert.equal(v.run("controls.find(c=>c.key==='client.start').input.attributes['aria-label']"),'Event starting time');
 });

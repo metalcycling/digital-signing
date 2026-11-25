@@ -54,7 +54,7 @@ def test_gmail_invitation_and_completion_are_multipart_and_idempotent(tmp_path,m
         assert len(attachments)==1
         assert attachments[0].get_content_type()=='application/pdf'
         assert attachments[0].get_payload(decode=True)==final_pdf
-        assert attachments[0].get_filename().endswith('-fully-executed.pdf')
+        assert attachments[0].get_filename() == 'Full signing workflow.pdf'
     app.post(base+'/1/countersign',json=vendor_payload(submitted),headers=HEADERS)
     assert smtp.send_message.call_count == 4
     assert app.get('/api/email-delivery').json()['mode'] == 'gmail'

@@ -242,3 +242,22 @@ def test_locked_values_cannot_be_changed_or_omitted(tag):
 def test_invalid_locks_fail_at_render_time(tag):
     with pytest.raises(RenderError):
         render_html('<p>'+tag+'</p>')
+
+
+@pytest.mark.parametrize('value', ['0', '0.25', '.5', '12', '1e3', '1e-3'])
+def test_number_fields_accept_nonnegative_numbers(value):
+    field = render_html('<p>{{client.amount|number}}</p>')['fields'][0]
+    assert not validate_values([field], {'client.amount':value})
+
+
+@pytest.mark.parametrize('value', ['-1', '-0.01', '-1e3', 'NaN', 'Infinity', 'abc', '1_000', '$100', '1.2.3'])
+def test_number_fields_reject_negative_or_nonnumeric_values_and_defaults(value):
+    field = render_html('<p>{{client.amount|number}}</p>')['fields'][0]
+    assert validate_values([field], {'client.amount':value})['client.amount'] == 'Enter a number that is zero or greater.'
+    with pytest.raises(RenderError):
+        render_html('<p>{{client.amount|number|default='+value+'}}</p>')
+
+
+def test_time_labels_use_event_wording_and_preserve_custom_labels():
+    fields = render_html('<p>{{client.start_time|time}}</p><p>{{client.end_time|time}}</p><p>{{event.time|time|label=Client start time}}</p><p>{{vendor.end|time|label=Sound check}}</p>')['fields']
+    assert [f['label'] for f in fields] == ['Event starting time', 'Event ending time', 'Event starting time', 'Sound check']

@@ -179,7 +179,8 @@ def test_invitation_uses_subject_in_body_and_new_links_default_to_seven_days(tmp
     options.update(invitation_title=title, invitation_body='Hello {recipient_name},\nPlease review and sign the agreement for {contract_name} using the private link below.')
     email = app.post(base+'/1/send',json={**RECIPIENT,'email_options':options},headers=HEADERS).json()
     assert email['subject'] == 'Signature request for ' + title
-    assert 'for '+title+' using' in email['body']
+    assert 'for '+title+' by clicking the button below.' in email['body']
+    assert 'using the private link below.' not in email['html_body']
     assert '<strong>Harp &amp; music &lt;at home&gt;</strong>' in email['html_body']
     assert 'Full signing workflow' not in email['body']
     assert 'font-size:22px' in email['html_body']

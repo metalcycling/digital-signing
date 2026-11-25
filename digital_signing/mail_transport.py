@@ -40,7 +40,7 @@ def build_message(row, settings, sender, final_pdf=None):
         if not final_pdf:
             raise ValueError('The fully executed PDF is missing.')
         msg.add_attachment(final_pdf, maintype='application', subtype='pdf',
-                           filename=f'{row["contract_id"]}-v{row["version"]}-fully-executed.pdf')
+                           filename=row['attachment_filename'])
     return msg
 
 
@@ -83,11 +83,12 @@ def install_mail(app, db, lock, settings):
                     return dict(con.execute('SELECT * FROM outbox WHERE id=?', (message_id,)).fetchone())
                 final_pdf = None
                 if row['attach_final_pdf']:
-                    saved = con.execute('SELECT final_pdf FROM submissions WHERE contract_id=? AND version=?', (row['contract_id'],row['version'])).fetchone()
+                    saved = con.execute('SELECT submissions.final_pdf, contracts.name FROM submissions JOIN contracts ON contracts.id=submissions.contract_id WHERE submissions.contract_id=? AND submissions.version=?', (row['contract_id'],row['version'])).fetchone()
                     if not saved or not saved['final_pdf']:
                         con.execute("UPDATE outbox SET delivery_status='failed',delivery_error='The fully executed PDF is unavailable.' WHERE id=?", (message_id,))
                         return dict(con.execute('SELECT * FROM outbox WHERE id=?',(message_id,)).fetchone())
                     final_pdf = bytes(saved['final_pdf'])
+                    row['attachment_filename'] = saved['name'] + '.pdf'
                 con.execute("UPDATE outbox SET delivery_status='sending', delivery_error=NULL WHERE id=?", (message_id,))
             smtp = None
             attempted = False
