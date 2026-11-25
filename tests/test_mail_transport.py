@@ -44,6 +44,12 @@ def test_gmail_invitation_and_completion_are_multipart_and_idempotent(tmp_path,m
     assert {m['To'] for m in completion_messages} == {'jane@example.com','sender@example.com'}
     for m in completion_messages:
         assert m['Subject'].startswith('Fully executed:')
+        for kind in ('plain', 'html'):
+            body = m.get_body(preferencelist=(kind,)).get_content()
+            assert 'http://localhost' not in body
+            assert '/sign/' not in body and '/countersign/' not in body
+            assert 'href=' not in body and 'expires' not in body
+            assert 'attached for your records' in body
         attachments=list(m.iter_attachments())
         assert len(attachments)==1
         assert attachments[0].get_content_type()=='application/pdf'
@@ -170,3 +176,26 @@ def test_vendor_completion_retry_does_not_resend_client_copy(tmp_path,monkeypatc
     assert smtp.send_message.call_args.args[0]['To']=='vendor@example.com'
     attached=list(smtp.send_message.call_args.args[0].iter_attachments())[0]
     assert attached.get_payload(decode=True)==app.get(signed.json()['final_pdf_url']).content
+
+
+def test_attachment_only_completion_can_retry_after_page_link_expires(tmp_path, monkeypatch):
+    import sqlite3
+    _, _, base, payload = prepared(tmp_path)
+    app, smtp, _ = gmail_client(tmp_path, monkeypatch)
+    app.post(base+'/1/send', json=RECIPIENT, headers=HEADERS)
+    submitted = app.post(base+'/1/submit', json=payload, headers=HEADERS).json()
+    smtp.login.side_effect = smtplib.SMTPAuthenticationError(535, b'private')
+    result = app.post(base+'/1/countersign', json=vendor_payload(submitted), headers=HEADERS)
+    assert result.status_code == 200
+    with sqlite3.connect(tmp_path/'contracts-demo.sqlite3') as con:
+        con.execute("UPDATE invitations SET completion_expires_at='2000-01-01T00:00:00+00:00'")
+    emails = [row for row in app.get('/api/outbox').json() if row['kind'] in {'completed', 'completed_vendor'}]
+    assert len(emails) == 2
+    smtp.login.side_effect = None
+    for email in emails:
+        assert email['delivery_status'] == 'failed'
+        retry = app.post(f'/api/outbox/{email["id"]}/send', headers=HEADERS)
+        assert retry.json()['delivery_status'] == 'sent'
+        message = smtp.send_message.call_args.args[0]
+        assert len(list(message.iter_attachments())) == 1
+        assert 'href=' not in message.get_body(preferencelist=('html',)).get_content()

@@ -5,7 +5,7 @@
   panel.className = 'email-composer';
   panel.innerHTML = `
     <h3>Email messages</h3>
-    <p>Edit these messages for this agreement, or save them as your defaults for future agreements. The signature-request body uses the subject title you enter; the greeting updates as you enter the client’s name. Saved defaults keep automatic personalization. The subject title appears bold in the invitation; the agreement name appears bold in the completion email. The private link and expiration notice are added automatically.</p>
+    <p>Edit these messages for this agreement, or save them as your defaults for future agreements. The signature-request body uses the subject title you enter; the greeting updates as you enter the client’s name. Saved defaults keep automatic personalization. The subject title appears bold in the invitation; the agreement name appears bold in the completion email. The signing link and expiration notice are added to the signature request automatically. Completion emails include the signed PDF attachment without an app link.</p>
     <label for="invitation-title">Email subject</label>
     <div class="email-subject"><span>Signature request for</span><textarea id="invitation-title" name="agreement_subject_title" rows="1" autocomplete="off" maxlength="200" required aria-label="Subject title after Signature request for"></textarea></div>
     <label for="invitation-body">Signature request — greeting, message, and closing</label>
@@ -13,11 +13,9 @@
     <label for="signing-days">Signing link expires after (days)</label>
     <input id="signing-days" type="number" min="1" max="365" step="1" required>
     <details><summary>Completed-agreement email</summary>
-    <p>This message will be created automatically when you countersign. Its new link expires this many days after completion.</p>
+    <p>This message will be sent automatically to the client when you countersign, with the fully executed PDF attached. You also receive a copy with the PDF attached.</p>
     <label for="completion-body">Completed agreement — greeting, message, and closing</label>
     <textarea id="completion-body" rows="8" maxlength="10000" required></textarea><p>Formatted message preview</p><div id="completion-preview" class="email-body-preview"></div>
-    <label for="completion-days">Completed-agreement link expires after (days)</label>
-    <input id="completion-days" type="number" min="1" max="365" step="1" required>
     </details>
     <button id="save-email-defaults" type="button" class="text-button">Save messages & expirations as defaults</button>
     <p id="email-defaults-status" role="status"></p>`;
@@ -25,8 +23,10 @@
   panel.addEventListener('invalid', event => { event.target.closest('details')?.setAttribute('open',''); }, true);
   const $ = id => document.getElementById(id);
   $('invitation-title').addEventListener('keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
-  const fields = {'invitation_title':'invitation-title','invitation_body':'invitation-body','completion_body':'completion-body','signing_days':'signing-days','completion_days':'completion-days'};
+  const fields = {'invitation_title':'invitation-title','invitation_body':'invitation-body','completion_body':'completion-body','signing_days':'signing-days'};
   const templates = {};
+  // Preserve the stored access policy for existing completion pages; emails are attachment-only.
+  let completionDays = 7;
   let names = {recipient_name:'', contract_name:''};
   function segments(template) {
     return template.split(/(\{(?:recipient_name|contract_name|invitation_subject)\})/).filter(Boolean).map(raw => ({raw, text:/^\{(?:recipient_name|contract_name|invitation_subject)\}$/.test(raw) ? names[raw.slice(1,-1)] || raw : raw}));
@@ -83,7 +83,7 @@
   });
   function values() {
     for (const key of bodyKeys) capture(key);
-    return Object.fromEntries(Object.entries(fields).map(([key,id]) => [key,key.endsWith('_days') ? Number($(id).value) : templates[key]]));
+    return {...Object.fromEntries(Object.entries(fields).map(([key,id]) => [key,key.endsWith('_days') ? Number($(id).value) : templates[key]])), completion_days:completionDays};
   }
   async function request(options) {
     const response = await fetch('/api/email-defaults',options);
@@ -98,6 +98,7 @@
     $('send-confirm').textContent = delivery.mode === 'gmail' ? 'Send email' : 'Create test email';
     $('send-mode-note').textContent = delivery.mode === 'gmail' ? 'This sends a real email through Gmail. Localhost links open only on this computer.' : 'Local test: the email will appear in the outbox. No email will be sent.';
     const data = await request();
+    completionDays = data.completion_days;
     names = {recipient_name:$('recipient-name').value.trim(), contract_name:contractName, invitation_subject:''};
     for (const [key,id] of Object.entries(fields)) {
       if (!key.endsWith('_days')) { templates[key] = key === 'invitation_title' ? '' : key === 'invitation_body' ? data[key].replaceAll('{contract_name}', '{invitation_subject}') : data[key]; paint(key); }

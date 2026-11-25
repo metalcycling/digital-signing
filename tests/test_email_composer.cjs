@@ -28,6 +28,7 @@ test('personalizes both bodies, preserves edits and reusable defaults when recip
   assert.equal(saved.invitation_body,'Hello {recipient_name},\nPlease review and sign {invitation_subject}.\nThank you!');
   assert.equal(saved.invitation_title,'Music for Wedding agreement');
   assert.equal(saved.completion_body,defaults.completion_body);
+  assert.equal(saved.completion_days,defaults.completion_days);
   // A name changed directly in the body is an intentional custom greeting.
   get('completion-body').value=get('completion-body').value.replace('Pedro','Friends');get('completion-body').events.input();
   get('recipient-name').value='Alex';get('recipient-name').events.input();

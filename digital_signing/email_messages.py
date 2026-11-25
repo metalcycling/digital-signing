@@ -54,10 +54,12 @@ def defaults(con):
     return options
 
 
-def message(template, name, contract, link, days, subject=None):
+def message(template, name, contract, link, days, subject=None, *, include_link=True):
     # Substitute only supported names, preserving other braces as ordinary text.
     import re
     text = re.sub(r'\{(recipient_name|contract_name|invitation_subject)\}', lambda m: {'recipient_name':name,'contract_name':contract,'invitation_subject':subject if subject is not None else contract}[m[1]], template)
+    if not include_link:
+        return text
     return f'{text}\n\n{link}\n\nThis private link expires in {days} days. Keep it private; anyone with the link can access this agreement.'
 
 
@@ -65,12 +67,14 @@ def agreement_link(link, label='Open agreement'):
     return f'<p><a href="{html.escape(link, quote=True)}" style="display:inline-block;padding:16px 28px;background-color:#172d39;color:#ffffff;font-family:Arial,sans-serif;font-size:22px;font-weight:bold;line-height:1.4;text-decoration:underline;border-radius:6px;">{html.escape(label)}</a></p>'
 
 
-def html_message(template, name, contract, link, days, subject=None):
+def html_message(template, name, contract, link, days, subject=None, *, include_link=True):
     parts = re.split(r'(\{(?:recipient_name|contract_name|invitation_subject)\})', template)
     body = ''.join('<strong>'+html.escape(contract)+'</strong>' if part == '{contract_name}'
                    else '<strong>'+html.escape(subject if subject is not None else contract)+'</strong>' if part == '{invitation_subject}'
                    else html.escape(name) if part == '{recipient_name}' else html.escape(part)
                    for part in parts).replace('\n', '<br>')
+    if not include_link:
+        return f'<p>{body}</p>'
     return f'<p>{body}</p>{agreement_link(link)}<p>This private link expires in <strong>{days} days</strong>. Keep it private; anyone with the link can access this agreement.</p>'
 
 
@@ -85,13 +89,13 @@ def queue_completion(con, contract_id, version, contract_name, signed_at, vendor
         con.execute('UPDATE invitations SET completion_token_hash=?, completion_expires_at=? WHERE contract_id=? AND version=?',
                     (hashlib.sha256(token.encode()).hexdigest(), expires, contract_id, version))
     subject = f'Fully executed: {contract_name}'
-    vendor_body = f'Hello,\n\nThe agreement for {contract_name} is fully executed. The final PDF, including both signatures, is attached for your records.\n\n{link}\n\nThank you,\nBello Entertainment'
-    vendor_html = f'<p>Hello,</p><p>The agreement for <strong>{html.escape(contract_name)}</strong> is fully executed. The final PDF, including both signatures, is attached for your records.</p>{agreement_link(link, "Open completed agreement")}<p>Thank you,<br>Bello Entertainment</p>'
+    vendor_body = f'Hello,\n\nThe agreement for {contract_name} is fully executed. The final PDF, including both signatures, is attached for your records.\n\nThank you,\nBello Entertainment'
+    vendor_html = f'<p>Hello,</p><p>The agreement for <strong>{html.escape(contract_name)}</strong> is fully executed. The final PDF, including both signatures, is attached for your records.</p><p>Thank you,<br>Bello Entertainment</p>'
     con.execute('INSERT INTO outbox (contract_id,version,kind,recipient_email,subject,body,link,created_at,html_body,attach_final_pdf) VALUES (?,?,?,?,?,?,?,?,?,1)',
                 (contract_id,version,'completed_vendor',vendor_email,subject,vendor_body,link,signed_at,vendor_html))
     if invite:
         body = re.sub('fully signed','fully executed',options.completion_body,flags=re.IGNORECASE)
         con.execute('INSERT INTO outbox (contract_id,version,kind,recipient_email,subject,body,link,created_at,html_body,attach_final_pdf) VALUES (?,?,?,?,?,?,?,?,?,1)',
                     (contract_id,version,'completed',invite['recipient_email'],subject,
-                     message(body,invite['recipient_name'],contract_name,link,options.completion_days),link,signed_at,
-                     html_message(body,invite['recipient_name'],contract_name,link,options.completion_days)))
+                     message(body,invite['recipient_name'],contract_name,link,options.completion_days,include_link=False),link,signed_at,
+                     html_message(body,invite['recipient_name'],contract_name,link,options.completion_days,include_link=False)))

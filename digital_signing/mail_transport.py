@@ -66,7 +66,7 @@ def install_mail(app, db, lock, settings):
                     raise HTTPException(409, 'Enable Gmail delivery first.')
                 invite = con.execute('SELECT * FROM invitations WHERE contract_id=? AND version=?', (row['contract_id'],row['version'])).fetchone()
                 latest = con.execute('SELECT MAX(version) FROM renders WHERE contract_id=?', (row['contract_id'],)).fetchone()[0]
-                if row['kind'] == 'completed_vendor' and not invite:
+                if row['kind'] in {'completed', 'completed_vendor'}:
                     contract = con.execute('SELECT status FROM contracts WHERE id=?', (row['contract_id'],)).fetchone()
                     inactive = latest != row['version'] or not contract or contract['status'] != 'completed'
                     reason = 'This agreement version is no longer current.'
@@ -75,7 +75,7 @@ def install_mail(app, db, lock, settings):
                     inactive = latest != row['version'] or not contract or contract['status'] != 'awaiting_vendor'
                     reason = 'This agreement no longer needs a vendor signature.'
                 else:
-                    expiry = (invite['completion_expires_at'] if row['kind'] in {'completed','completed_vendor'} else invite['expires_at']) if invite else None
+                    expiry = invite['expires_at'] if invite else None
                     inactive = latest != row['version'] or not expiry or datetime.fromisoformat(expiry) <= datetime.now(timezone.utc)
                     reason = 'This link expired or was replaced. Create a new revision.'
                 if inactive:

@@ -111,7 +111,9 @@ def test_custom_messages_defaults_and_fresh_completion_expiration(tmp_path):
     completion = app.get('/api/outbox').json()[0]
     assert 'Hello Jane Smith,' in completion['body']
     assert 'Thank you, The team' in completion['body']
-    assert 'expires in 60 days' in completion['body']
+    assert 'expires' not in completion['body']
+    assert completion['link'] not in completion['body']
+    assert completion['link'] not in completion['html_body']
     assert app.get(email['link']).status_code == 410
     assert app.get(completion['link']).status_code == 200
     final_base = '/api/sign/'+completion['link'].split('/')[-1]+'/1'
