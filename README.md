@@ -86,6 +86,15 @@ Invitation bodies use the manually entered subject title in bold. Signing links 
 
 Use `locked=true` with a valid `default=` to prevent changes after rendering, for example `{{client.price|number|default=1000|locked=true}}`. Locked fields are enforced on submission. Signatures, initials, and automatic signing dates cannot be locked.
 
+Calculated fields are automatically read-only, have no `default=`, and update from source answers:
+
+```text
+{{client.week_day|text|calc=weekday(client.event_date)}}
+{{client.total_time|number|calc=duration_hours(client.start_time,client.end_time)}} hours
+```
+
+Sources must be ordinary date/time fields belonging to the same signer. Calculations stay blank until inputs are complete and are recalculated by the server on submission and after corrections. Duration uses clock hours in 15-minute increments: an earlier end time means the following day, with an explicit note; identical times are invalid. The tag builder includes both calculations. Missing sources, wrong types, and unsupported expressions block rendering.
+
 Rendered input widths follow the field type, prefilled answer, and dropdown choices rather than the length of the tag. Longer answers remain accessible in the pop-up editor. Render a draft again to apply updated sizing; previously saved and signed versions keep their original layout.
 
 ## Tests

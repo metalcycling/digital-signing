@@ -140,11 +140,18 @@ $('refresh').addEventListener('click', async () => { try { await loadContracts()
 
 function buildTag() {
   const key = $('tag-key').value.trim();
+  const calculation = $('tag-calculation').value || '';
+  $('tag-type').disabled = Boolean(calculation);
+  if (calculation) $('tag-type').value = calculation === 'weekday' ? 'text' : 'number';
   const type = $('tag-type').value;
+  $('tag-calc-wrap').hidden = !calculation;
+  $('tag-calc-end-wrap').hidden = calculation !== 'duration_hours';
+  $('tag-calc-source-label').textContent = calculation === 'duration_hours' ? 'Start time field name' : 'Date field name';
+  $('tag-calc-source').placeholder = calculation === 'duration_hours' ? 'client.start_time' : 'client.event_date';
   const label = $('tag-label').value.trim();
   const options = $('tag-options').value.trim();
   const automaticDate = type === 'signing_date' || (type === 'date' && ['signing_date','signed_date','signature_date','singning_date'].includes(key.split('.').pop()));
-  const supportsDefault = !['signature','initials'].includes(type) && !automaticDate;
+  const supportsDefault = !calculation && !['signature','initials'].includes(type) && !automaticDate;
   $('tag-default-wrap').hidden = !supportsDefault;
   $('tag-locked-wrap').hidden = !supportsDefault;
   const lockField = supportsDefault && $('tag-locked').checked;
@@ -158,7 +165,11 @@ function buildTag() {
   if (type === 'select' && (choices.length < 2 || choices.length > 50 || choices.some(v => !v || v.length > 100) || new Set(choices).size !== choices.length)) error = 'Provide 2–50 distinct dropdown choices, separated by semicolons.';
   if (label.length > 150) error = 'Keep the label under 151 characters.';
   if (lockField && !defaultValue) error = 'A locked field needs a valid prefilled answer.';
+  const sources = [$('tag-calc-source').value.trim(), ...(calculation === 'duration_hours' ? [$('tag-calc-end').value.trim()] : [])];
+  if (calculation && sources.some(source => !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(source) || source === key)) error = 'Enter valid source field names, different from the calculated field name.';
+  if (calculation === 'duration_hours' && sources[0] === sources[1]) error = 'Choose different start and end fields.';
   const pieces = [key, type];
+  if (calculation) pieces.push(`calc=${calculation}(${sources.join(',')})`);
   if (lockField) pieces.push('locked=true');
   if (label) pieces.push(`label=${label}`);
   if (type === 'select') pieces.push(`options=${choices.join(';')}`, `other=${$('tag-other').checked ? 'true' : 'false'}`);
@@ -170,7 +181,7 @@ function buildTag() {
   $('copy-tag').disabled = Boolean(error);
   $('copy-result').textContent = '';
 }
-for (const id of ['tag-key', 'tag-type', 'tag-label', 'tag-options', 'tag-other', 'tag-default', 'tag-locked', 'tag-required', 'tag-role']) $(id).addEventListener('input', buildTag);
+for (const id of ['tag-key', 'tag-type', 'tag-calculation', 'tag-calc-source', 'tag-calc-end', 'tag-label', 'tag-options', 'tag-other', 'tag-default', 'tag-locked', 'tag-required', 'tag-role']) $(id).addEventListener('input', buildTag);
 $('copy-tag').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('tag-output').textContent); $('copy-result').textContent = 'Copied. Paste into Google Docs.'; }
   catch { $('copy-result').textContent = 'Select the tag above and copy it manually.'; }

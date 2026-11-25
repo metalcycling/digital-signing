@@ -10,6 +10,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.colors import HexColor
 from reportlab.lib.utils import ImageReader
 
+from digital_signing.calculations import time_minutes
+
 FONT = 'ContractSans'
 pdfmetrics.registerFont(TTFont(FONT, str(Path(__file__).parent / 'static/fonts/NotoSans-Regular.ttf')))
 
@@ -136,6 +138,11 @@ def create_completed_pdf(snapshot, page_images, values, client, vendor=None):
             write('Signature method: ' + value['method'], 8)
         else:
             write(display_answer(field, value) or '(blank)', 10)
+            calc = field.get('calc', {})
+            if calc.get('function') == 'duration_hours':
+                start, end = [time_minutes(values.get(key)) for key in calc['sources']]
+                if start is not None and end is not None and end < start:
+                    write('End time is on the following day.', 10)
         y -= 6
     pdf.save()
     return output.getvalue()

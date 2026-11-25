@@ -16,6 +16,8 @@ def normalize_signer(payload, fields, role, timestamp, zone):
     for field in fields:
         if field['role']==role and is_signing_date(field):
             values[field['key']] = signing_day(timestamp,zone)
+    from digital_signing.calculations import calculate_values
+    values, _ = calculate_values(fields, values, role)
     name = payload.signer_name
     if not name:
         for key in (f'{role}.name', f'{role}.full_name', f'{role}.signer_name'):

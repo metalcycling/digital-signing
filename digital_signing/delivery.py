@@ -166,7 +166,7 @@ def install_delivery(app, db, lock, static, handlers, asset):
             snapshot.update(version=new_version, created_at=now, correction_from=version, correction_note=payload.note,
                             prefill_values={f['key']:answers[f['key']] for f in snapshot['fields']
                                             if f['role']=='client' and f['type'] not in {'signature','initials'}
-                                            and not is_signing_date(f) and f['key'] in answers})
+                                            and not is_signing_date(f) and not f.get('calc') and f['key'] in answers})
             for page in snapshot['pages']:
                 page['image_url'] = f"/api/contracts/{contract_id}/renders/{new_version}/pages/{page['number']}.png"
             con.execute('INSERT INTO renders VALUES (?,?,?,?)', (contract_id,new_version,now,json.dumps(snapshot)))

@@ -39,7 +39,7 @@ function post(body) { return {method: 'POST', headers: {'Content-Type': 'applica
 function definition(key) { return snapshot.fields.find(f => f.key === key) || workflow.vendor_fields.find(f => f.key === key); }
 function isLocked(state) { return state.superseded || (isReview && state.sent) || state.state !== (isVendor ? 'awaiting_vendor' : 'editable'); }
 function isSigningDate(field) { return field.type === 'signing_date' || (field.type === 'date' && ['signing_date','signed_date','signature_date','singning_date'].includes(field.key.split('.').pop())); }
-function canEdit(field) { return !locked && !field.locked && field.role === activeRole && !isSigningDate(field); }
+function canEdit(field) { return !locked && !field.locked && !field.calc && field.role === activeRole && !isSigningDate(field); }
 function signingFields() { return isVendor ? workflow.vendor_fields : snapshot.fields.filter(f => f.role === 'client'); }
 function showErrors(fieldErrors) {
   for (const key of Object.keys(errors)) delete errors[key];
@@ -107,7 +107,59 @@ function displayValue(field) {
   if (field.type === 'time' && value) {const [h,m]=value.split(':');return `${Number(h)%12||12}:${m} ${Number(h)<12?'AM':'PM'}`;}
   return value || (field.role === 'vendor' ? 'Vendor' : ({select:'Choose…', date:'Date', time:'Time', textarea:'Add text…'})[field.type] || field.label);
 }
-function updateValue(field, value) {
+function calculateFields(fields, answers) {
+  const computed = {}, fieldErrors = {}, notes = [];
+  const byKey = key => fields.find(field => field.key === key);
+  const minutes = value => typeof value === 'string' && /^(?:[01][0-9]|2[0-3]):(?:00|15|30|45)(?::00)?$/.test(value.trim()) ? Number(value.trim().slice(0,2))*60+Number(value.trim().slice(3,5)) : null;
+  for (const field of fields) {
+    if (!field.calc) continue;
+    const {function:kind, sources} = field.calc;
+    computed[field.key] = '';
+    const inputs = sources.map(key => answers[key] ?? '');
+    const missing = sources.filter((key,index) => typeof inputs[index] === 'string' && !inputs[index].trim());
+    if (missing.length) {
+      if (field.required) for (const key of missing) fieldErrors[key] = `Complete this field to calculate ${field.label}.`;
+      continue;
+    }
+    if (kind === 'weekday') {
+      const raw = typeof inputs[0] === 'string' ? inputs[0].trim() : '';
+      const date = new Date(`${raw}T12:00:00Z`);
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(raw) || Number(raw.slice(0,4)) < 1 || !Number.isFinite(date.getTime()) || date.toISOString().slice(0,10) !== raw) {
+        fieldErrors[sources[0]] = 'Enter a valid date to calculate the day of the week.';
+      } else computed[field.key] = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][date.getUTCDay()];
+    } else if (kind === 'duration_hours') {
+      const times = inputs.map(minutes);
+      const invalid = sources.filter((key,index) => times[index] === null);
+      if (invalid.length) {
+        for (const key of invalid) fieldErrors[key] = 'Choose a valid time in 15-minute intervals to calculate the duration.';
+      } else if (times[0] === times[1]) {
+        fieldErrors[sources[1]] = 'Choose different start and end times; the event duration must be greater than zero.';
+      } else {
+        computed[field.key] = String(((times[1]-times[0]+1440)%1440)/60);
+        if (times[1] < times[0]) notes.push(`${byKey(sources[1])?.label || 'End time'} is on the following day (${computed[field.key]} hours).`);
+      }
+    }
+  }
+  return {computed, errors:fieldErrors, notes};
+}
+let calculationErrorKeys = [];
+function refreshCalculations() {
+  if (!snapshot) return;
+  const result = calculateFields(snapshot.fields, values);
+  for (const key of calculationErrorKeys) delete errors[key];
+  // Only active, editable source fields should show calculation validation errors.
+  const activeErrors = Object.fromEntries(Object.entries(result.errors).filter(([key]) => canEdit(definition(key)) && typeof values[key] === 'string' && values[key].trim()));
+  Object.assign(errors, activeErrors); calculationErrorKeys = Object.keys(activeErrors);
+  for (const [key,value] of Object.entries(result.computed)) {
+    if (values[key] !== value) updateValue(definition(key), value, false);
+  }
+  for (const control of controls) control.input.setAttribute('aria-invalid', errors[control.key] ? 'true' : 'false');
+  if (floating) $('floating-field-error').textContent = errors[floating.field.key] || '';
+  const note = $('calculation-notes');
+  note.textContent = result.notes.join(' '); note.hidden = !result.notes.length;
+}
+
+function updateValue(field, value, recalculate = true) {
   values[field.key] = value; dirty = true; delete errors[field.key];
   for (const control of controls.filter(c => c.key === field.key)) {
     if (field.type === 'signature') paintSignature(control.input, field);
@@ -122,6 +174,7 @@ function updateValue(field, value) {
     else floating.input.value = value;
     $('floating-field-error').textContent = '';
   }
+  if (recalculate) refreshCalculations();
 }
 function paintSignature(button, field) {
   const value = values[field.key];
@@ -495,13 +548,14 @@ $('preview-form').addEventListener('submit', async (event) => {
     locked = isLocked(workflow);
     for (const field of snapshot.fields) {
       if ((field.role === activeRole || field.locked) && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(field,'default')) values[field.key] = field.default;
-      if (!field.locked && field.role === 'client' && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(snapshot.prefill_values || {},field.key)) values[field.key] = snapshot.prefill_values[field.key];
+      if (!field.locked && !field.calc && field.role === 'client' && !['signature','initials'].includes(field.type) && !isSigningDate(field) && Object.hasOwn(snapshot.prefill_values || {},field.key)) values[field.key] = snapshot.prefill_values[field.key];
     }
     $('correction-note-panel').hidden = !snapshot.correction_note;
     $('correction-note-text').textContent = snapshot.correction_note || '';
     for (const field of snapshot.fields) if (isSigningDate(field) && field.role === activeRole) values[field.key] = workflow.signing_date;
     if (workflow.client) Object.assign(values, workflow.client.values);
     if (workflow.vendor) Object.assign(values, workflow.vendor.values);
+    refreshCalculations(); dirty = false;
     $('consent-text').textContent = isVendor ? workflow.vendor_consent : workflow.client_consent;
     if (isReview) $('document-instructions').textContent = 'Review each page, then choose Review & send when the agreement is ready for the client.';
     if (isVendor) {

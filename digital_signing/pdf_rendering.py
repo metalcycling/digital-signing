@@ -75,7 +75,9 @@ def control_width(field, font_size):
     value = str(value).strip() if value is not None else ''
     if value.upper() == 'REQUIRED':
         value = ''
-    if kind in {'date', 'signing_date'}:
+    if field.get('calc', {}).get('function') == 'weekday':
+        value = 'Wednesday'
+    elif kind in {'date', 'signing_date'}:
         # Reserve weekday space even when this date currently falls on a shorter day.
         value = '09-30-2027 (Wednesday)'
     elif kind == 'time':

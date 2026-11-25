@@ -21,7 +21,7 @@ class Element {
   reportValidity() { return true; }
   getBoundingClientRect() { return {left:0, right:300, top:0, bottom:50, width:300, height:50}; }
 }
-async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, labels={}, lockedFields=[], closeBlocked=false, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
+async function viewer({vendor=true, state='awaiting_vendor', superseded=false, placed=true, recipient=false, review=false, sent=false, prefills={}, correctionNote=null, defaults={}, labels={}, extraFields=[], lockedFields=[], closeBlocked=false, validationErrors=null, submissionError=false, deliveryError=null, sendStatus='local', sendError=false}={}) {
   const elements = new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   get('zoom').value = 'fit';
@@ -35,6 +35,7 @@ async function viewer({vendor=true, state='awaiting_vendor', superseded=false, p
     {key:'client.provided_email',type:'text',role:'client',label:'Provided email',required:true},
     {key:'client.signature',type:'signature',role:'client',label:'Client signature',required:true},
   ];
+  fields.push(...extraFields);
   const vendorField = {key:'vendor.signature',type:'signature',role:'vendor',label:'Vendor signature',required:true};
   if (placed) fields.push(vendorField);
   for (const field of fields) {
@@ -492,4 +493,44 @@ test('numbers have a nonnegative minimum and existing time labels use event word
   assert.equal(number.inputMode,'decimal');
   assert.equal(v.run("definition('client.start').label"),'Event starting time');
   assert.equal(v.run("controls.find(c=>c.key==='client.start').input.attributes['aria-label']"),'Event starting time');
+});
+
+const calculatedFields = [
+  {key:'client.end',type:'time',role:'client',label:'Event ending time',required:true},
+  {key:'client.week_day',type:'text',role:'client',label:'Weekday',required:true,locked:true,calc:{function:'weekday',sources:['client.date']}},
+  {key:'client.total_time',type:'number',role:'client',label:'Total hours',required:true,locked:true,calc:{function:'duration_hours',sources:['client.start','client.end']}},
+];
+test('calculated fields update on edits and clearing, and show overnight assumptions',async()=>{
+  const v=await viewer({vendor:false,state:'editable',extraFields:calculatedFields});
+  for(const key of ['client.week_day','client.total_time']) assert.equal(v.run(`controls.find(c=>c.key==='${key}').input.disabled`),true);
+  v.run("updateValue(definition('client.date'),'2026-11-30');updateValue(definition('client.start'),'23:00');updateValue(definition('client.end'),'01:30')");
+  assert.equal(v.run("values['client.week_day']"),'Monday');
+  assert.equal(v.run("values['client.total_time']"),'2.5');
+  assert.equal(v.run("controls.find(c=>c.key==='client.total_time').input.value"),'2.5');
+  assert.match(v.get('calculation-notes').textContent,/following day \(2.5 hours\)/);
+  v.run("updateValue(definition('client.start'),'00:00')");
+  assert.equal(v.run("values['client.total_time']"),'1.5');
+  assert.equal(v.get('calculation-notes').hidden,true);
+  v.run("updateValue(definition('client.end'),'00:00')");
+  assert.equal(v.run("values['client.total_time']"),'');
+  assert.match(v.run("errors['client.end']"),/different start and end/);
+  v.run("updateValue(definition('client.date'),'2027-02-29')");
+  assert.equal(v.run("values['client.week_day']"),'');
+  v.run("updateValue(definition('client.date'),'2024-02-29')");
+  assert.equal(v.run("values['client.week_day']"),'Thursday');
+  v.run("updateValue(definition('client.date'),'');updateValue(definition('client.start'),'')");
+  assert.equal(v.run("values['client.week_day']"),'');
+  assert.equal(v.run("values['client.total_time']"),'');
+});
+
+test('calculation initializes from defaults and correction answers rather than stale results',async()=>{
+  for(const options of [
+    {defaults:{'client.date':'2026-11-30','client.start':'19:00','client.end':'21:15'}},
+    {prefills:{'client.date':'2026-11-30','client.start':'19:00','client.end':'21:15','client.week_day':'Wrong','client.total_time':'999'}},
+  ]){
+    const v=await viewer({vendor:false,state:'editable',extraFields:calculatedFields,...options});
+    assert.equal(v.run("values['client.week_day']"),'Monday');
+    assert.equal(v.run("values['client.total_time']"),'2.25');
+    assert.equal(v.run('dirty'),false);
+  }
 });

@@ -56,3 +56,22 @@ test('tag builder requires a prefill for locks and excludes signature locks',()=
   assert.equal(get('tag-locked-wrap').hidden,true);
   assert.equal(get('tag-output').textContent,'{{client.signature|signature}}');
 });
+
+test('tag builder creates calculated tags without defaults or manual locks',()=>{
+  const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false});return nodes.get(id);};
+  const source=fs.readFileSync('digital_signing/static/app.js','utf8');
+  const context=vm.createContext({$:get});
+  vm.runInContext(source.slice(source.indexOf('function buildTag()'),source.indexOf("for (const id of ['tag-key'")),context);
+  get('tag-key').value='client.week_day';get('tag-calculation').value='weekday';get('tag-role').value='client';get('tag-required').checked=true;
+  get('tag-default').value='stale';get('tag-locked').checked=true;
+  vm.runInContext('buildTag()',context);
+  assert.equal(get('copy-tag').disabled,true);
+  get('tag-calc-source').value='client.event_date';vm.runInContext('buildTag()',context);
+  assert.equal(get('tag-output').textContent,'{{client.week_day|text|calc=weekday(client.event_date)}}');
+  assert.equal(get('tag-default-wrap').hidden,true);
+  assert.equal(get('tag-type').disabled,true);
+  get('tag-key').value='client.total_time';get('tag-calculation').value='duration_hours';get('tag-calc-source').value='client.start_time';get('tag-calc-end').value='client.end_time';vm.runInContext('buildTag()',context);
+  assert.equal(get('tag-output').textContent,'{{client.total_time|number|calc=duration_hours(client.start_time,client.end_time)}}');
+  get('tag-calc-end').value='client.start_time';vm.runInContext('buildTag()',context);
+  assert.equal(get('copy-tag').disabled,true);
+});

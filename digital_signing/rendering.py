@@ -11,6 +11,7 @@ from zipfile import ZipFile, BadZipFile
 
 from bs4 import BeautifulSoup, Comment, NavigableString
 import tinycss2
+from digital_signing.calculations import parse_calculation, validate_calculations, calculate_values
 from digital_signing.signatures import signature_error
 from digital_signing.signing_rules import is_signing_date
 
@@ -90,6 +91,11 @@ def field_definition(raw):
             field['label'] = value
         elif name == 'default' and '=' in part and value:
             field['default'] = value
+        elif name == 'calc':
+            try:
+                field['calc'] = parse_calculation(value)
+            except ValueError as error:
+                raise RenderError(f'Invalid calculation for {key}: {error}') from error
         elif name == 'locked' and (part == 'locked' or value in {'true', 'false'}):
             field['locked'] = part == 'locked' or value == 'true'
         elif name == 'role' and value in {'client', 'vendor'}:
@@ -105,6 +111,11 @@ def field_definition(raw):
             raise RenderError(f'Unknown or invalid setting "{part}" in {raw}.')
     if field_type == 'select' and not field['options']:
         raise RenderError(f'Dropdown {key} needs options=First choice;Second choice.')
+    if field.get('calc'):
+        expected = 'text' if field['calc']['function'] == 'weekday' else 'number'
+        if field_type != expected or 'default' in field or field.get('locked') is False:
+            raise RenderError(f'Calculated field {key} must use {expected}, cannot have a default, and is always locked.')
+        field['locked'] = True
     if 'default' in field:
         if field_type in {'signature', 'initials'} or is_signing_date(field):
             raise RenderError(f'Field {key} cannot have a default: signatures, initials, and automatic signing dates must be completed when signing.')
@@ -116,7 +127,7 @@ def field_definition(raw):
         errors = validate_values([dict(field, role='client', required=False)], {key:field['default']})
         if errors:
             raise RenderError(f'Invalid default for {key}: {errors[key]}')
-    if field.get('locked'):
+    if field.get('locked') and not field.get('calc'):
         if 'default' not in field or field_type in {'signature', 'initials'} or is_signing_date(field):
             raise RenderError(f'Locked field {key} needs a valid prefilled answer and cannot be a signature, initials, or signing date.')
         errors = validate_values([dict(field, role='client')], {key:field['default']})
@@ -216,6 +227,10 @@ def render_html(html, images=None):
     remaining = root.get_text()
     if TOKEN.search(remaining) or '{{' in remaining or '}}' in remaining:
         raise RenderError('A placeholder crosses a paragraph or unsupported layout boundary. Keep each complete tag inside one paragraph or table cell.')
+    try:
+        validate_calculations(list(fields.values()))
+    except ValueError as error:
+        raise RenderError(str(error)) from error
     if any(f['type'] in {'signature', 'initials'} for f in fields.values()):
         warnings.append('Signatures and initials are saved when the client submits the agreement. A preparation-only review check does not submit it.')
     if not fields:
@@ -237,7 +252,7 @@ def allows_other(field):
 
 
 def validate_values(fields, values):
-    errors = {}
+    values, errors = calculate_values(fields, values)
     known = {f['key'] for f in fields if f['role'] == 'client'}
     for key in values.keys() - known:
         errors[key] = 'Unknown field or a field reserved for the vendor.'
@@ -246,6 +261,8 @@ def validate_values(fields, values):
             continue
         key, kind = field['key'], field['type']
         value = values.get(key, False if kind == 'checkbox' else '')
+        if field.get('calc'):
+            continue  # Source validation and server calculations determine this answer.
         if field.get('locked') and (key not in values or type(value) is not type(field.get('default')) or value != field['default']):
             errors[key] = 'This field is locked to the prefilled answer. Ask the sender to revise the agreement if it is incorrect.'
             continue
