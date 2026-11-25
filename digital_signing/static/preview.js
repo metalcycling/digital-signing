@@ -60,8 +60,7 @@ function documentButton(field) { return ['date','signing_date','time'].includes(
 function dateDisplay(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return value;
-  const day = new Date(`${value}T12:00:00Z`).toLocaleDateString('en-US',{weekday:'long',timeZone:'UTC'});
-  return `${match[2]}-${match[3]}-${match[1]} (${day})`;
+  return `${match[2]}-${match[3]}-${match[1]}`;
 }
 function makeComposite(field) {
   const group = document.createElement('div'); group.className='composite-editor'; group.setAttribute('role','group');
@@ -356,7 +355,10 @@ function drawPages() {
         input.setAttribute('aria-haspopup', 'dialog'); input.setAttribute('aria-expanded', 'false');
       }
       input.classList.add('pdf-field'); input.title = `${field.label} (${field.type})`;
-      setRect(input, placement.box);
+      const box = [...placement.box];
+      // Also compact date controls in snapshots rendered before this sizing change.
+      if (['date','signing_date'].includes(field.type)) box[2] = Math.min(box[2], 72 * placement.font_size / 11);
+      setRect(input, box);
       input.style.setProperty('--field-line-height', `${Math.max(1, placement.box[3]*4/3-2)}px`);
       input.style.fontSize = `${Math.min(placement.font_size, placement.box[3]*.76)*4/3}px`;
       input.dataset.baseFont = parseFloat(input.style.fontSize);

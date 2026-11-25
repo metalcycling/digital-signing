@@ -78,8 +78,7 @@ def control_width(field, font_size):
     if field.get('calc', {}).get('function') == 'weekday':
         value = 'Wednesday'
     elif kind in {'date', 'signing_date'}:
-        # Reserve weekday space even when this date currently falls on a shorter day.
-        value = '09-30-2027 (Wednesday)'
+        value = '09-30-2027'
     elif kind == 'time':
         value = '12:45 PM'
     choices = [value]

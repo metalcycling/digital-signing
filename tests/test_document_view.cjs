@@ -338,7 +338,8 @@ test('provided recipient details do not prefill the name the client enters when 
 test('document dates use MM-DD-YYYY while stored values stay ISO', async()=>{
   const v=await viewer({vendor:false,state:'editable'});
   v.run("updateValue(definition('client.date'), '2027-06-12')");
-  assert.equal(v.run("controls.find(c=>c.key==='client.date').input.textContent"),'06-12-2027 (Saturday)');
+  assert.equal(v.run("controls.find(c=>c.key==='client.date').input.textContent"),'06-12-2027');
+  assert.ok(parseFloat(v.run("controls.find(c=>c.key==='client.date').input.style.width")) < 110);
   assert.equal(v.run("values['client.date']"),'2027-06-12');
   v.run("updateValue(definition('client.date'), '')");
   assert.equal(v.run("controls.find(c=>c.key==='client.date').input.textContent"),'MM-DD-YYYY');
@@ -346,7 +347,7 @@ test('document dates use MM-DD-YYYY while stored values stay ISO', async()=>{
 
 test('signing dates are prefilled and locked; times offer quarter-hour AM/PM choices',async()=>{
   const v=await viewer({vendor:false,state:'editable'});
-  assert.equal(v.run("controls.find(c=>c.key==='client.signing_date').input.textContent"),'11-17-2026 (Tuesday)');
+  assert.equal(v.run("controls.find(c=>c.key==='client.signing_date').input.textContent"),'11-17-2026');
   assert.equal(v.run("controls.find(c=>c.key==='client.signing_date').input.disabled"),true);
   assert.equal(v.run("controls.find(c=>c.key==='client.date').input.disabled"),false);
   v.run("globalThis.timeInput = makeInput(definition('client.start'))");
