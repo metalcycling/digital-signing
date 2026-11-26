@@ -56,12 +56,64 @@ function allowsOther(field) {
   const key = field.key.toLowerCase().replaceAll('.', '_');
   return field.type === 'select' && (field.allow_other || field.options.some(option=>option.toLowerCase()==='other') || ['event_type','type_of_event','event_category'].some(suffix=>key.endsWith(suffix)) || ['type of event','event type'].includes(field.label.toLowerCase()));
 }
-function documentButton(field) { return ['date','signing_date','time'].includes(field.type) || allowsOther(field); }
+function documentButton(field) { return ['address','date','signing_date','time'].includes(field.type) || allowsOther(field); }
 function dateDisplay(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return value;
   return `${match[2]}-${match[3]}-${match[1]}`;
 }
+function makeAddressEditor(field) {
+  const group = document.createElement('div');
+  group.className = 'composite-editor address-editor';
+  const add = (label, choices, limit) => {
+    const wrap = document.createElement('label');
+    wrap.textContent = label;
+    const input = document.createElement(choices ? 'select' : 'input');
+    if (choices) {
+      input.append(new Option('—', ''));
+      for (const item of choices) input.append(new Option(item, item));
+    } else {
+      input.type = 'text';
+      input.maxLength = limit;
+    }
+    input.disabled = !canEdit(field);
+    wrap.append(input);
+    group.append(wrap);
+    return input;
+  };
+  const street = add('Street number and street name', null, 120);
+  const kind = add('Unit type (optional)', ['Apt', 'Suite', 'Room', 'Other']);
+  const unit = add('Unit number or description', null, 40);
+  const city = add('City', null, 80);
+  const state = add('State', 'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR'.split(' '));
+  const zip = add('ZIP code', null, 5);
+  zip.inputMode = 'numeric';
+  const parts = [street, kind, unit, city, state, zip];
+  const read = () => {
+    if (!parts.some(input => input.value.trim())) return '';
+    const secondary = kind.value ? ', ' + kind.value + ' ' + unit.value.trim() : '';
+    return street.value.trim() + secondary + ', ' + city.value.trim() + ', ' + state.value + ' ' + zip.value;
+  };
+  let editing = false;
+  Object.defineProperty(group, 'value', {get: read, set(value) {
+    if (editing) return;
+    const match = /^(.*?),(?:\s*(Apt|Suite|Room|Other) ([^,]*),)?\s*([^,]*),\s*([A-Z]{2})?\s*(\d{0,5})$/.exec(value || '');
+    parts.forEach((input,i) => { input.value = match ? (match[i+1] || '').trim() : (i === 0 ? value || '' : ''); });
+    unit.disabled = !kind.value || !canEdit(field);
+  }});
+  group.value = values[field.key] || '';
+  group.focus = options => street.focus(options);
+  for (const input of parts) input.addEventListener(input === state || input === kind ? 'change' : 'input', () => {
+    if (!kind.value) unit.value = '';
+    unit.disabled = !kind.value;
+    zip.value = zip.value.replace(/\D/g, '').slice(0,5);
+    editing = true;
+    updateValue(field, read());
+    editing = false;
+  });
+  return group;
+}
+
 function makeComposite(field) {
   const group = document.createElement('div'); group.className='composite-editor'; group.setAttribute('role','group');
   const addSelect = (label, options) => {
@@ -203,7 +255,9 @@ function makeInput(field, onDocument = false) {
     return button;
   }
   let input;
-  if (field.type === 'time' || allowsOther(field)) {
+  if (field.type === 'address') {
+    input = makeAddressEditor(field);
+  } else if (field.type === 'time' || allowsOther(field)) {
     input = makeComposite(field);
   } else if (field.type === 'select') {
     input = document.createElement('select'); input.append(new Option('Choose…', ''));
@@ -224,7 +278,7 @@ function makeInput(field, onDocument = false) {
   if (field.type === 'signature') input.classList.add('signature-input');
   if (field.type === 'checkbox') input.checked = Boolean(values[field.key]);
   else input.value = values[field.key] || '';
-  if (field.type !== 'time' && !allowsOther(field)) input.addEventListener('input', () => updateValue(field, input.type === 'checkbox' ? input.checked : input.value));
+  if (!['time','address'].includes(field.type) && !allowsOther(field)) input.addEventListener('input', () => updateValue(field, input.type === 'checkbox' ? input.checked : input.value));
   return input;
 }
 function highlightField(field) {
@@ -268,14 +322,32 @@ function openFloating(field, anchor) {
   const error = document.createElement('p'); error.id = 'floating-field-error'; error.className = 'field-error'; error.textContent = errors[field.key] || '';
   input.setAttribute('aria-describedby', error.id);
   const done = document.createElement('button'); done.type = 'button'; done.textContent = 'Apply';
-  done.addEventListener('click', () => closeFloating(true));
+  done.addEventListener('click', async () => {
+    if (field.type === 'address' && !isVendor) {
+      const answer = values[field.key] || '';
+      done.disabled = true;
+      error.textContent = 'Checking address…';
+      try {
+        const check = await api(`${base}/${snapshot.version}/validate`, post({[field.key]:answer}));
+        if (floating?.input !== input || (values[field.key] || '') !== answer) return;
+        error.textContent = check.errors[field.key] || '';
+        if (error.textContent) return;
+      } catch (failure) {
+        error.textContent = failure.message;
+        return;
+      } finally {
+        done.disabled = false;
+      }
+    }
+    closeFloating(true);
+  });
   floatingEditor.replaceChildren(title, hint, input, error, done);
   floating = {field, anchor, input}; floatingEditor.hidden = false;
   anchor.setAttribute('aria-expanded', 'true');
   positionFloating(); input.focus({preventScroll:true});
 }
 function needsFloating(field, input) {
-  if (field.type === 'textarea' || field.type === 'time' || allowsOther(field)) return true;
+  if (['textarea','time','address'].includes(field.type) || allowsOther(field)) return true;
   if (!['select', 'date', 'time'].includes(field.type)) return false;
   const rect = input.getBoundingClientRect();
   return rect.height < 30 || rect.width < (field.type === 'date' ? 160 : 125);

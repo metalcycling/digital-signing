@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     mode: Literal["demo", "google"] = "demo"
     email_mode: Literal["local", "gmail"] = "local"
     signing_timezone: str = "America/New_York"
+    address_api_key: str = ""
     vendor_email: str = ""
     email_base_url: str = "http://localhost:8000"
     template_folder_id: str = "11K4hQcCiXVSq7GF2OEXQfYZ3ee9oXUFD"

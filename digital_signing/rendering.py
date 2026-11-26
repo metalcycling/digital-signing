@@ -15,7 +15,9 @@ from digital_signing.calculations import parse_calculation, validate_calculation
 from digital_signing.signatures import signature_error
 from digital_signing.signing_rules import is_signing_date
 
-TYPES = {'text', 'textarea', 'number', 'date', 'signing_date', 'time', 'phone', 'email', 'select', 'checkbox', 'initials', 'signature'}
+from digital_signing.addresses import validate_address
+
+TYPES = {'address', 'text', 'textarea', 'number', 'date', 'signing_date', 'time', 'phone', 'email', 'select', 'checkbox', 'initials', 'signature'}
 TOKEN = re.compile(r'\{\{[^{}]*\}\}')
 KEY = re.compile(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\Z')
 SAFE_TAGS = {'p', 'div', 'span', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 's', 'sup', 'sub', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'img'}
@@ -71,6 +73,8 @@ def field_definition(raw):
     if not KEY.fullmatch(key):
         raise RenderError(f'Invalid field name in {raw}. Use names such as client.name.')
     field_type = pieces.pop(0).lower() if pieces and '=' not in pieces[0] and pieces[0] not in {'optional', 'required', 'locked'} else 'text'
+    if field_type in {'text', 'textarea'} and key.split('.')[-1] in {'address', 'venue_address'}:
+        field_type = 'address'
     parts = pieces
     label = key.replace('.', ' ').replace('_', ' ').capitalize()
     if field_type not in TYPES:
@@ -251,7 +255,7 @@ def allows_other(field):
     return field['type']=='select' and (field.get('allow_other') or any(option.lower()=='other' for option in field.get('options',[])) or key.endswith(('event_type','type_of_event','event_category')) or label in {'type of event','event type'})
 
 
-def validate_values(fields, values):
+def validate_values(fields, values, *, address_api_key=None):
     values, errors = calculate_values(fields, values)
     known = {f['key'] for f in fields if f['role'] == 'client'}
     for key in values.keys() - known:
@@ -288,6 +292,11 @@ def validate_values(fields, values):
         if not value:
             if field['required']:
                 errors[key] = 'This field is required.'
+            continue
+        if kind == 'address' and address_api_key is not None:
+            error = validate_address(value, address_api_key)
+            if error:
+                errors[key] = error
             continue
         try:
             if kind == 'number':

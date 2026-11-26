@@ -535,3 +535,13 @@ test('calculation initializes from defaults and correction answers rather than s
     assert.equal(v.run('dirty'),false);
   }
 });
+
+test('address editor preserves the optional unit and leading zero ZIP', async () => {
+  const field = {key:'client.address',type:'address',role:'client',required:true,label:'Address'};
+  const v = await viewer({vendor:false,state:'editable',extraFields:[field]});
+  v.run("globalThis.editor = makeInput(definition('client.address')); editor.value = '123 Main St, Apt 3B, Boston, MA 02108'");
+  assert.equal(v.run('editor.children[2].children[0].value'), '3B');
+  assert.equal(v.run('editor.children[5].children[0].value'), '02108');
+  v.run("editor.children[1].children[0].value = ''; editor.children[1].children[0].events.change()");
+  assert.equal(v.run("values['client.address']"), '123 Main St, Boston, MA 02108');
+});

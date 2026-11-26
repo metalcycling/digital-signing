@@ -126,3 +126,5 @@ uv run python -m digital_signing.backups restore /private/path/snapshot.backup \
 ```
 
 Restore checks encryption, file checksums, and database integrity. Stop the production app before replacing live data, retain the original data for rollback, and review settings before restarting. Do not commit `.env`, OAuth credentials, tokens, databases, signatures, or backup archives.
+
+Use `{{client.address|address}}` for a US street address. Newly rendered text or textarea tags named `address` or `venue_address` also use the address editor. Enter a prefill as `123 Main St, Apt 2B, Albany, NY 12207` (the unit is optional). Enable Google's Address Validation API and set `SIGNING_ADDRESS_API_KEY` on the server using a key restricted to that API. Address checks use USPS delivery point confirmation for the building. Unit information stays in the agreement. Failed or unavailable verification blocks submission.

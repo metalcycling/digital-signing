@@ -239,7 +239,7 @@ def install_delivery(app, db, lock, static, handlers, asset):
 
     @app.post('/api/sign/{token}/{version}/validate')
     def validate(token: str, version: int, values: dict[str,str|bool|dict]):
-        errors = validate_values(snapshot(token,version)['fields'], values)
+        errors = validate_values(snapshot(token,version)['fields'], values, address_api_key=app.state.address_api_key)
         return {'valid':not errors,'errors':errors}
 
     @app.post('/api/sign/{token}/{version}/submit')

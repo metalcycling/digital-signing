@@ -17,6 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from digital_signing.config import Settings
 from digital_signing.drive import GoogleDrive
 from digital_signing.workflow import install_workflow
+from digital_signing.addresses import validate_address
 from digital_signing.rendering import DEMO_HTML, RenderError, unpack_export, validate_values
 from digital_signing.pdf_rendering import demo_pdf, render_pdf
 
@@ -220,6 +221,11 @@ def create_app(settings=None, drive_factory=GoogleDrive):
                     raise HTTPException(502, "Unable to export the agreement. Check Google access, wait for Docs to finish saving, and try again.") from error
             try:
                 snapshot, page_images = render_pdf(pdf_content, source, images)
+                for field in snapshot['fields']:
+                    if field['type'] == 'address' and field.get('locked'):
+                        error = validate_address(field['default'], settings.address_api_key)
+                        if error:
+                            raise RenderError(f"{field['label']}: {error}")
             except RenderError as error:
                 raise HTTPException(422, str(error)) from error
             now = datetime.now(timezone.utc).isoformat()
@@ -282,7 +288,7 @@ def create_app(settings=None, drive_factory=GoogleDrive):
     @app.post("/api/contracts/{contract_id}/renders/{version}/validate")
     def check_preview(contract_id: str, version: int, values: dict[str, str | bool | dict]):
         snapshot = saved_render(contract_id, version)
-        errors = validate_values(snapshot["fields"], values)
+        errors = validate_values(snapshot["fields"], values, address_api_key=settings.address_api_key)
         return {"valid": not errors, "errors": errors,
                 "message": "Preview check only. Answers are not stored and no signature or submission is recorded."}
 
@@ -291,6 +297,7 @@ def create_app(settings=None, drive_factory=GoogleDrive):
         contract_record(contract_id)
         return FileResponse(STATIC / "preview.html")
 
+    app.state.address_api_key = settings.address_api_key
     app.state.email_mode = settings.email_mode
     app.state.signing_timezone = settings.signing_timezone
     handlers = install_workflow(app, db, lock, STATIC)
